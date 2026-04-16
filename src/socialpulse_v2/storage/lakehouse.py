@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+import pandas as pd
+import pyarrow as pa
+from deltalake.writer import write_deltalake
+
 from socialpulse_v2.core.paths import BRONZE_ROOT, GOLD_ROOT, LAKEHOUSE_ROOT, SILVER_ROOT
 from socialpulse_v2.schemas.table_specs import TABLE_SPECS, TableSpec
 
@@ -12,6 +16,12 @@ ZONE_ROOTS = {
   "bronze": BRONZE_ROOT,
   "silver": SILVER_ROOT,
   "gold": GOLD_ROOT,
+}
+
+
+ARROW_TYPE_MAP = {
+  "string": pa.string(),
+  "int64": pa.int64(),
 }
 
 
@@ -73,6 +83,29 @@ class LakehouseManager:
 
     return catalog_path
 
+  def write_dataframe(self, table_key: str, df: pd.DataFrame, mode: str = "append") -> Path:
+    if df.empty:
+      raise ValueError(f"Cannot write empty dataframe to table {table_key}")
+
+    spec = TABLE_SPECS[table_key]
+    table_path = self.bootstrap_table(spec)
+
+    aligned_df = self._align_dataframe_to_spec(df, spec)
+    arrow_schema = self._build_arrow_schema(spec)
+    arrow_table = pa.Table.from_pandas(
+      aligned_df,
+      schema=arrow_schema,
+      preserve_index=False,
+    )
+
+    write_deltalake(
+      str(table_path),
+      arrow_table,
+      mode=mode,
+      partition_by=spec.partition_by,
+    )
+    return table_path
+
   def describe_tables(self) -> List[dict]:
     descriptions = []
     for key, spec in TABLE_SPECS.items():
@@ -86,3 +119,24 @@ class LakehouseManager:
         }
       )
     return descriptions
+
+  def _build_arrow_schema(self, spec: TableSpec) -> pa.Schema:
+      fields = []
+      for column_name, type_name in spec.schema_fields.items():
+        fields.append(pa.field(column_name, ARROW_TYPE_MAP[type_name], nullable=True))
+      return pa.schema(fields)
+
+  def _align_dataframe_to_spec(self, df: pd.DataFrame, spec: TableSpec) -> pd.DataFrame:
+    aligned = df.copy()
+
+    for column_name, type_name in spec.schema_fields.items():
+        if column_name not in aligned.columns:
+          aligned[column_name] = pd.NA
+
+        if type_name == "int64":
+          aligned[column_name] = pd.to_numeric(aligned[column_name], errors="coerce").astype("Int64")
+        else:
+          aligned[column_name] = aligned[column_name].astype("string")
+
+    aligned = aligned[list(spec.schema_fields.keys())]
+    return aligned
