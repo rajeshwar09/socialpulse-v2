@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import List
 
@@ -38,7 +38,7 @@ def build_daily_collection_plan(
       if proposed <= total_budget:
         selected_rows.append(
           {
-            "plan_date": datetime.utcnow().strftime("%Y-%m-%d"),
+            "plan_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "platform": query.platform,
             "query_id": query.query_id,
             "topic": query.topic,
@@ -54,7 +54,7 @@ def build_daily_collection_plan(
       else:
         selected_rows.append(
           {
-            "plan_date": datetime.utcnow().strftime("%Y-%m-%d"),
+            "plan_date": datetime.now(UTC).strftime("%Y-%m-%d"),
             "platform": query.platform,
             "query_id": query.query_id,
             "topic": query.topic,
