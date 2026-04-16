@@ -22,5 +22,8 @@ run-daily-plan:
 run-daily-youtube:
 	python -m socialpulse_v2.orchestration.run_daily_youtube_collection
 
+run-bronze-daily-ingestion:
+	python -m socialpulse_v2.orchestration.run_bronze_daily_ingestion
+
 tree:
 	find . -maxdepth 4 | sort
