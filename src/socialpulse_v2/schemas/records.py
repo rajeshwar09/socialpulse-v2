@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
 
 
@@ -25,17 +25,22 @@ class YouTubeCommentRawRecord(BaseModel):
   query_text: Optional[str] = None
   topic: Optional[str] = None
   genre: Optional[str] = None
+  thread_id: Optional[str] = None
+  record_type: str
   video_id: Optional[str] = None
   channel_id: Optional[str] = None
   comment_id: str
   parent_comment_id: Optional[str] = None
   author_name: Optional[str] = None
+  author_channel_id: Optional[str] = None
   text: str
   like_count: Optional[int] = None
   reply_count: Optional[int] = None
   published_at: Optional[str] = None
   fetched_at: str
   language_target: Optional[str] = None
+  detected_language_label: Optional[str] = None
+  detected_language_code: Optional[str] = None
 
 
 class YouTubeCommentCleanRecord(BaseModel):

@@ -1,4 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap tree
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap tree
 
 install:
 	pip install -r requirements.txt
@@ -12,6 +12,9 @@ run-dashboard:
 
 run-lakehouse-bootstrap:
 	python -m socialpulse_v2.orchestration.bootstrap_lakehouse
+
+run-historical-bootstrap:
+	python -m socialpulse_v2.orchestration.bootstrap_historical_youtube
 
 tree:
 	find . -maxdepth 4 | sort
