@@ -101,9 +101,9 @@ class LakehouseManager:
     write_deltalake(
       str(table_path),
       arrow_table,
-      mode=mode,
+      mode=mode, # type: ignore
       partition_by=spec.partition_by,
-    )
+    ) # type: ignore
     return table_path
 
   def describe_tables(self) -> List[dict]:

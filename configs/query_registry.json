@@ -1,0 +1,112 @@
+[
+  {
+    "query_id": "yt-smartphone-reviews-01",
+    "platform": "youtube",
+    "topic": "smartphones",
+    "genre": "technology",
+    "query_text": "best smartphone review 2026",
+    "priority": 10,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 1200
+  },
+  {
+    "query_id": "yt-smartphone-camera-01",
+    "platform": "youtube",
+    "topic": "smartphones",
+    "genre": "technology",
+    "query_text": "smartphone camera comparison 2026",
+    "priority": 9,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 1000
+  },
+  {
+    "query_id": "yt-laptop-reviews-01",
+    "platform": "youtube",
+    "topic": "laptops",
+    "genre": "technology",
+    "query_text": "best laptop review 2026",
+    "priority": 9,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 1200
+  },
+  {
+    "query_id": "yt-gaming-laptops-01",
+    "platform": "youtube",
+    "topic": "laptops",
+    "genre": "technology",
+    "query_text": "best gaming laptop review 2026",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 900
+  },
+  {
+    "query_id": "yt-ott-reviews-01",
+    "platform": "youtube",
+    "topic": "ott_platforms",
+    "genre": "entertainment",
+    "query_text": "best ott platform reviews india",
+    "priority": 7,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 700
+  },
+  {
+    "query_id": "yt-movie-reactions-01",
+    "platform": "youtube",
+    "topic": "movies",
+    "genre": "entertainment",
+    "query_text": "new movie reaction review",
+    "priority": 7,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 700
+  },
+  {
+    "query_id": "yt-budget-phones-01",
+    "platform": "youtube",
+    "topic": "smartphones",
+    "genre": "technology",
+    "query_text": "best budget phone under 20000 review",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 900
+  },
+  {
+    "query_id": "yt-ai-tools-01",
+    "platform": "youtube",
+    "topic": "ai_tools",
+    "genre": "technology",
+    "query_text": "best ai tools review 2026",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 850
+  },
+  {
+    "query_id": "yt-web-series-01",
+    "platform": "youtube",
+    "topic": "web_series",
+    "genre": "entertainment",
+    "query_text": "best web series review",
+    "priority": 6,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 650
+  },
+  {
+    "query_id": "yt-cricket-highlights-01",
+    "platform": "youtube",
+    "topic": "cricket",
+    "genre": "sports",
+    "query_text": "cricket match reaction analysis",
+    "priority": 6,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 600
+  }
+]
