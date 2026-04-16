@@ -28,6 +28,11 @@ data/raw/*
 data/bronze/*
 data/silver/*
 data/gold/*
+data/lakehouse/*
+!data/lakehouse/.gitkeep
+!data/lakehouse/bronze/.gitkeep
+!data/lakehouse/silver/.gitkeep
+!data/lakehouse/gold/.gitkeep
 
 # Keep folders
 !data/raw/.gitkeep
