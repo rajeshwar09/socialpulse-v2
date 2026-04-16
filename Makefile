@@ -1,4 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan tree
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube tree
 
 install:
 	pip install -r requirements.txt
@@ -18,6 +18,9 @@ run-historical-bootstrap:
 
 run-daily-plan:
 	python -m socialpulse_v2.orchestration.plan_daily_collection
+
+run-daily-youtube:
+	python -m socialpulse_v2.orchestration.run_daily_youtube_collection
 
 tree:
 	find . -maxdepth 4 | sort
