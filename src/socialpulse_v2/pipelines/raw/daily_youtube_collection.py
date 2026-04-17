@@ -8,46 +8,33 @@ from typing import Any
 import pandas as pd
 
 from socialpulse_v2.collectors.youtube.api_client import YouTubeAPIClient
+from socialpulse_v2.pipelines.gold.dashboard_daily_overview import build_dashboard_overview_daily
 from socialpulse_v2.storage.lakehouse import LakehouseManager
 
 
-def load_selected_queries(plan_path: Path) -> list[dict[str, Any]]:
+def load_plan_payload(plan_path: Path) -> dict[str, Any]:
   with plan_path.open("r", encoding="utf-8") as fp:
     payload = json.load(fp)
 
   if isinstance(payload, list):
-    return [row for row in payload if row.get("status") == "selected"]
-
-  if isinstance(payload, dict):
-    selected = payload.get("selected_queries", [])
-    if isinstance(selected, list):
-      return selected
-
-  raise ValueError("Unsupported daily collection plan structure.")
-
-
-def load_plan_metadata(plan_path: Path) -> dict[str, Any]:
-  with plan_path.open("r", encoding="utf-8") as fp:
-    payload = json.load(fp)
-
-  if isinstance(payload, dict):
     return {
-      "plan_version": payload.get("plan_version", "v1"),
-      "plan_date": payload.get("plan_date"),
-      "generated_at": payload.get("generated_at"),
-      "platform": payload.get("platform", "youtube"),
-      "budget": payload.get("budget", {}),
-      "summary": payload.get("summary", {}),
+      "plan_version": "v1",
+      "selected_queries": [row for row in payload if row.get("status") == "selected"],
+      "deferred_queries": [row for row in payload if row.get("status") != "selected"],
     }
 
-  return {
-    "plan_version": "v1",
-    "plan_date": None,
-    "generated_at": None,
-    "platform": "youtube",
-    "budget": {},
-    "summary": {},
-  }
+  return payload
+
+
+def load_selected_queries(plan_path: Path) -> tuple[str, list[dict[str, Any]]]:
+  payload = load_plan_payload(plan_path)
+  plan_version = str(payload.get("plan_version", "v1"))
+  selected_queries = payload.get("selected_queries", [])
+
+  if not isinstance(selected_queries, list):
+    raise ValueError("selected_queries must be a list in the plan payload")
+
+  return plan_version, selected_queries
 
 
 def sanitize_file_name(value: str) -> str:
@@ -169,7 +156,8 @@ def build_collection_daily_summary_rows(
   df = pd.DataFrame(query_performance_rows)
 
   summary_df = (
-    df.groupby(["run_date", "topic", "genre"], as_index=False)
+    df
+    .groupby(["run_date", "topic", "genre"], as_index=False)
     .agg(
       queries_executed=("query_id", "nunique"),
       total_videos_fetched=("videos_fetched", "sum"),
@@ -212,8 +200,7 @@ def run_daily_youtube_collection(
   lookback_days: int = 7,
   lakehouse_manager: LakehouseManager | None = None,
 ) -> dict[str, Any]:
-  selected_queries = load_selected_queries(plan_path)
-  plan_metadata = load_plan_metadata(plan_path)
+  plan_version, selected_queries = load_selected_queries(plan_path)
   selected_queries = selected_queries[:max_queries_per_run]
 
   run_timestamp = datetime.now(UTC)
@@ -303,20 +290,14 @@ def run_daily_youtube_collection(
         query_comments.append(normalized_row)
         all_comments.append(normalized_row)
 
-    query_file = run_dir / f"{sanitize_file_name(query_id)}.json"
-    query_file.write_text(
-      json.dumps(
-        {
-          "query_metadata": query,
-          "videos_fetched": videos,
-          "comments_fetched": query_comments,
-        },
-        indent=2,
-      ),
-      encoding="utf-8",
-    )
+    query_payload = {
+      "query_metadata": query,
+      "videos_fetched": videos,
+      "comments_fetched": query_comments,
+    }
 
-    query_errors = [e for e in errors if str(e.get("query_id")) == query_id]
+    query_file = run_dir / f"{sanitize_file_name(query_id)}.json"
+    query_file.write_text(json.dumps(query_payload, indent=2), encoding="utf-8")
 
     query_summaries.append(
       {
@@ -331,9 +312,6 @@ def run_daily_youtube_collection(
         "lookback_days": effective_lookback_days,
         "videos_count": len(videos),
         "comments_count": len(query_comments),
-        "records_written": len(query_comments),
-        "status": build_query_collection_status(len(query_comments), len(query_errors)),
-        "error_message": "; ".join(str(e.get("error", "")) for e in query_errors if e.get("error")),
         "file_path": str(query_file),
       }
     )
@@ -348,6 +326,7 @@ def run_daily_youtube_collection(
     "bronze_ingestion_runs": None,
     "gold_collection_daily_summary": None,
     "gold_query_performance_summary": None,
+    "gold_dashboard_overview_daily": None,
   }
 
   if query_summaries:
@@ -378,32 +357,31 @@ def run_daily_youtube_collection(
       pd.DataFrame(bronze_ingestion_rows),
       mode="append",
     )
+    gold_daily_path = manager.write_dataframe(
+      "gold.collection_daily_summary",
+      pd.DataFrame(collection_daily_rows),
+      mode="append",
+    )
+    gold_query_path = manager.write_dataframe(
+      "gold.query_performance_summary",
+      pd.DataFrame(query_performance_rows),
+      mode="append",
+    )
+
+    dashboard_summary = build_dashboard_overview_daily(manager)
+    dashboard_path = dashboard_summary.get("table_path")
+
     lakehouse_tables["bronze_ingestion_runs"] = str(bronze_path)
-
-    if collection_daily_rows:
-      gold_daily_path = manager.write_dataframe(
-        "gold.collection_daily_summary",
-        pd.DataFrame(collection_daily_rows),
-        mode="append",
-      )
-      lakehouse_tables["gold_collection_daily_summary"] = str(gold_daily_path)
-
-    if query_performance_rows:
-      gold_query_path = manager.write_dataframe(
-        "gold.query_performance_summary",
-        pd.DataFrame(query_performance_rows),
-        mode="append",
-      )
-      lakehouse_tables["gold_query_performance_summary"] = str(gold_query_path)
+    lakehouse_tables["gold_collection_daily_summary"] = str(gold_daily_path)
+    lakehouse_tables["gold_query_performance_summary"] = str(gold_query_path)
+    lakehouse_tables["gold_dashboard_overview_daily"] = str(dashboard_path) if dashboard_path else None
 
   manifest = {
     "run_id": run_id,
     "run_date": run_date,
     "generated_at": created_at,
+    "plan_version": plan_version,
     "plan_path": str(plan_path),
-    "plan_version": plan_metadata.get("plan_version"),
-    "plan_generated_at": plan_metadata.get("generated_at"),
-    "plan_budget": plan_metadata.get("budget", {}),
     "queries_executed": len(query_summaries),
     "total_comments_collected": len(all_comments),
     "query_summaries": query_summaries,
