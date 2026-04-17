@@ -42,3 +42,6 @@ run-kafka-consumer:
 
 tree:
 	find . -maxdepth 4 | sort
+run-silver-youtube-comments:
+	python -m socialpulse_v2.orchestration.run_silver_youtube_comments
+
