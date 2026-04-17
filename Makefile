@@ -25,5 +25,20 @@ run-daily-youtube:
 run-bronze-daily-ingestion:
 	python -m socialpulse_v2.orchestration.run_bronze_daily_ingestion
 
+kafka-up:
+	docker compose -f docker-compose.kafka.yml up -d
+
+kafka-down:
+	docker compose -f docker-compose.kafka.yml down
+
+kafka-logs:
+	docker compose -f docker-compose.kafka.yml logs -f kafka
+
+run-kafka-producer:
+	python -m socialpulse_v2.orchestration.publish_youtube_comments_to_kafka
+
+run-kafka-consumer:
+	python -m socialpulse_v2.orchestration.consume_youtube_comments_to_bronze
+
 tree:
 	find . -maxdepth 4 | sort
