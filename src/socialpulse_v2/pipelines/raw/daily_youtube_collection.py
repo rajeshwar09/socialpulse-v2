@@ -15,7 +15,39 @@ def load_selected_queries(plan_path: Path) -> list[dict[str, Any]]:
   with plan_path.open("r", encoding="utf-8") as fp:
     payload = json.load(fp)
 
-  return [row for row in payload if row.get("status") == "selected"]
+  if isinstance(payload, list):
+    return [row for row in payload if row.get("status") == "selected"]
+
+  if isinstance(payload, dict):
+    selected = payload.get("selected_queries", [])
+    if isinstance(selected, list):
+      return selected
+
+  raise ValueError("Unsupported daily collection plan structure.")
+
+
+def load_plan_metadata(plan_path: Path) -> dict[str, Any]:
+  with plan_path.open("r", encoding="utf-8") as fp:
+    payload = json.load(fp)
+
+  if isinstance(payload, dict):
+    return {
+      "plan_version": payload.get("plan_version", "v1"),
+      "plan_date": payload.get("plan_date"),
+      "generated_at": payload.get("generated_at"),
+      "platform": payload.get("platform", "youtube"),
+      "budget": payload.get("budget", {}),
+      "summary": payload.get("summary", {}),
+    }
+
+  return {
+    "plan_version": "v1",
+    "plan_date": None,
+    "generated_at": None,
+    "platform": "youtube",
+    "budget": {},
+    "summary": {},
+  }
 
 
 def sanitize_file_name(value: str) -> str:
@@ -27,7 +59,7 @@ def resolve_query_limit(query: dict[str, Any], key: str, fallback: int) -> int:
   value = query.get(key)
   if value in {None, ""}:
     return fallback
-  return int(value) # type: ignore
+  return int(value)
 
 
 def build_query_error_index(errors: list[dict[str, Any]]) -> dict[str, list[str]]:
@@ -137,8 +169,7 @@ def build_collection_daily_summary_rows(
   df = pd.DataFrame(query_performance_rows)
 
   summary_df = (
-    df
-    .groupby(["run_date", "topic", "genre"], as_index=False)
+    df.groupby(["run_date", "topic", "genre"], as_index=False)
     .agg(
       queries_executed=("query_id", "nunique"),
       total_videos_fetched=("videos_fetched", "sum"),
@@ -168,7 +199,7 @@ def build_collection_daily_summary_rows(
     ]
   ]
 
-  return summary_df.to_dict(orient="records") # type: ignore
+  return summary_df.to_dict(orient="records")
 
 
 def run_daily_youtube_collection(
@@ -182,6 +213,7 @@ def run_daily_youtube_collection(
   lakehouse_manager: LakehouseManager | None = None,
 ) -> dict[str, Any]:
   selected_queries = load_selected_queries(plan_path)
+  plan_metadata = load_plan_metadata(plan_path)
   selected_queries = selected_queries[:max_queries_per_run]
 
   run_timestamp = datetime.now(UTC)
@@ -202,21 +234,9 @@ def run_daily_youtube_collection(
     query_id = query["query_id"]
     query_text = query["query_text"]
 
-    effective_search_limit = resolve_query_limit(
-      query,
-      "search_results_limit",
-      search_results_per_query,
-    )
-    effective_comments_limit = resolve_query_limit(
-      query,
-      "comments_per_video_limit",
-      comments_per_video,
-    )
-    effective_lookback_days = resolve_query_limit(
-      query,
-      "lookback_days",
-      lookback_days,
-    )
+    effective_search_limit = resolve_query_limit(query, "search_results_limit", search_results_per_query)
+    effective_comments_limit = resolve_query_limit(query, "comments_per_video_limit", comments_per_video)
+    effective_lookback_days = resolve_query_limit(query, "lookback_days", lookback_days)
 
     try:
       videos = client.search_videos(
@@ -265,7 +285,7 @@ def run_daily_youtube_collection(
           "topic": query["topic"],
           "genre": query["genre"],
           "query_text": query_text,
-          "plan_date": query["plan_date"],
+          "plan_date": query.get("plan_date", run_date),
           "video_id": video["video_id"],
           "video_title": video["video_title"],
           "video_description": video["video_description"],
@@ -283,14 +303,20 @@ def run_daily_youtube_collection(
         query_comments.append(normalized_row)
         all_comments.append(normalized_row)
 
-    query_payload = {
-      "query_metadata": query,
-      "videos_fetched": videos,
-      "comments_fetched": query_comments,
-    }
-
     query_file = run_dir / f"{sanitize_file_name(query_id)}.json"
-    query_file.write_text(json.dumps(query_payload, indent=2), encoding="utf-8")
+    query_file.write_text(
+      json.dumps(
+        {
+          "query_metadata": query,
+          "videos_fetched": videos,
+          "comments_fetched": query_comments,
+        },
+        indent=2,
+      ),
+      encoding="utf-8",
+    )
+
+    query_errors = [e for e in errors if str(e.get("query_id")) == query_id]
 
     query_summaries.append(
       {
@@ -298,13 +324,16 @@ def run_daily_youtube_collection(
         "query_text": query_text,
         "topic": query["topic"],
         "genre": query["genre"],
-        "plan_date": query["plan_date"],
+        "plan_date": query.get("plan_date", run_date),
         "expected_units": int(query["expected_units"]),
         "search_results_limit": effective_search_limit,
         "comments_per_video_limit": effective_comments_limit,
         "lookback_days": effective_lookback_days,
         "videos_count": len(videos),
         "comments_count": len(query_comments),
+        "records_written": len(query_comments),
+        "status": build_query_collection_status(len(query_comments), len(query_errors)),
+        "error_message": "; ".join(str(e.get("error", "")) for e in query_errors if e.get("error")),
         "file_path": str(query_file),
       }
     )
@@ -349,29 +378,33 @@ def run_daily_youtube_collection(
       pd.DataFrame(bronze_ingestion_rows),
       mode="append",
     )
-    gold_daily_path = manager.write_dataframe(
-      "gold.collection_daily_summary",
-      pd.DataFrame(collection_daily_rows),
-      mode="append",
-    )
-    gold_query_path = manager.write_dataframe(
-      "gold.query_performance_summary",
-      pd.DataFrame(query_performance_rows),
-      mode="append",
-    )
+    lakehouse_tables["bronze_ingestion_runs"] = str(bronze_path)
 
-    lakehouse_tables = {
-      "bronze_ingestion_runs": str(bronze_path),
-      "gold_collection_daily_summary": str(gold_daily_path),
-      "gold_query_performance_summary": str(gold_query_path),
-    }
+    if collection_daily_rows:
+      gold_daily_path = manager.write_dataframe(
+        "gold.collection_daily_summary",
+        pd.DataFrame(collection_daily_rows),
+        mode="append",
+      )
+      lakehouse_tables["gold_collection_daily_summary"] = str(gold_daily_path)
+
+    if query_performance_rows:
+      gold_query_path = manager.write_dataframe(
+        "gold.query_performance_summary",
+        pd.DataFrame(query_performance_rows),
+        mode="append",
+      )
+      lakehouse_tables["gold_query_performance_summary"] = str(gold_query_path)
 
   manifest = {
     "run_id": run_id,
     "run_date": run_date,
     "generated_at": created_at,
     "plan_path": str(plan_path),
-    "queries_executed": len(selected_queries),
+    "plan_version": plan_metadata.get("plan_version"),
+    "plan_generated_at": plan_metadata.get("generated_at"),
+    "plan_budget": plan_metadata.get("budget", {}),
+    "queries_executed": len(query_summaries),
     "total_comments_collected": len(all_comments),
     "query_summaries": query_summaries,
     "normalized_comments_path": str(normalized_comments_path),

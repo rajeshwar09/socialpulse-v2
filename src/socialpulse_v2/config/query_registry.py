@@ -7,6 +7,9 @@ from typing import List
 from pydantic import BaseModel, Field
 
 
+DEFAULT_QUERY_REGISTRY_PATH = Path("configs/query_registry.json")
+
+
 class QueryDefinition(BaseModel):
   query_id: str
   platform: str
@@ -22,14 +25,19 @@ class QueryDefinition(BaseModel):
   lookback_days: int = Field(default=7, gt=0, le=30)
 
 
-def load_query_registry(path: Path) -> List[QueryDefinition]:
-  with path.open("r", encoding="utf-8") as fp:
+def load_query_registry(path: Path | None = None) -> List[QueryDefinition]:
+  registry_path = path or DEFAULT_QUERY_REGISTRY_PATH
+
+  with registry_path.open("r", encoding="utf-8") as fp:
     payload = json.load(fp)
 
   return [QueryDefinition(**item) for item in payload]
 
 
-def get_active_queries(path: Path, platform: str = "youtube") -> List[QueryDefinition]:
+def get_active_queries(
+  path: Path | None = None,
+  platform: str = "youtube",
+) -> List[QueryDefinition]:
   queries = load_query_registry(path)
   return [
     query

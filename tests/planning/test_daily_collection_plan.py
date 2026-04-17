@@ -15,7 +15,7 @@ def test_daily_collection_plan_respects_budget_and_carries_query_limits(tmp_path
       "priority": 10,
       "active": True,
       "cadence": "daily",
-      "expected_units": 6000,
+      "expected_units": 600,
       "search_results_limit": 5,
       "comments_per_video_limit": 20,
       "lookback_days": 7,
@@ -29,7 +29,7 @@ def test_daily_collection_plan_respects_budget_and_carries_query_limits(tmp_path
       "priority": 9,
       "active": True,
       "cadence": "daily",
-      "expected_units": 5000,
+      "expected_units": 500,
       "search_results_limit": 4,
       "comments_per_video_limit": 15,
       "lookback_days": 5,
@@ -43,7 +43,7 @@ def test_daily_collection_plan_respects_budget_and_carries_query_limits(tmp_path
       "priority": 8,
       "active": True,
       "cadence": "daily",
-      "expected_units": 3000,
+      "expected_units": 300,
       "search_results_limit": 3,
       "comments_per_video_limit": 10,
       "lookback_days": 3,
@@ -53,17 +53,16 @@ def test_daily_collection_plan_respects_budget_and_carries_query_limits(tmp_path
   path = tmp_path / "query_registry.json"
   path.write_text(json.dumps(sample), encoding="utf-8")
 
-  plan_df, summary = build_daily_collection_plan(
+  plan_payload, summary = build_daily_collection_plan(
     registry_path=path,
     platform="youtube",
-    total_budget=10000,
+    total_budget=1000,
   )
 
-  assert summary.total_budget_used <= 10000
+  assert summary.total_budget_used <= 1000
   assert summary.total_queries_selected == 2
   assert summary.total_queries_deferred == 1
-  assert "selected" in set(plan_df["status"].tolist())
-  assert "deferred_budget_limit" in set(plan_df["status"].tolist())
-  assert "search_results_limit" in plan_df.columns
-  assert "comments_per_video_limit" in plan_df.columns
-  assert "lookback_days" in plan_df.columns
+  assert len(plan_payload["selected_queries"]) == 2
+  assert len(plan_payload["deferred_queries"]) == 1
+  assert plan_payload["selected_queries"][0]["status"] == "selected"
+  assert plan_payload["deferred_queries"][0]["status"] == "deferred_budget_limit"
