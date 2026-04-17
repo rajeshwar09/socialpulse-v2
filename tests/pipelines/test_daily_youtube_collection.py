@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from socialpulse_v2.pipelines.raw.daily_youtube_collection import run_daily_youtube_collection
+from socialpulse_v2.storage.lakehouse import LakehouseManager
 
 
 class FakeYouTubeClient:
@@ -51,7 +52,7 @@ class FakeYouTubeClient:
     ]
 
 
-def test_run_daily_youtube_collection(tmp_path: Path, monkeypatch) -> None:
+def test_run_daily_youtube_collection_writes_manifest_and_delta_metrics(tmp_path: Path, monkeypatch) -> None:
   plan = [
     {
       "plan_date": "2026-04-16",
@@ -63,6 +64,9 @@ def test_run_daily_youtube_collection(tmp_path: Path, monkeypatch) -> None:
       "priority": 10,
       "cadence": "daily",
       "expected_units": 1200,
+      "search_results_limit": 2,
+      "comments_per_video_limit": 5,
+      "lookback_days": 7,
       "status": "selected",
     }
   ]
@@ -74,6 +78,8 @@ def test_run_daily_youtube_collection(tmp_path: Path, monkeypatch) -> None:
 
   monkeypatch.setattr(module, "YouTubeAPIClient", lambda api_key: FakeYouTubeClient())
 
+  lakehouse_manager = LakehouseManager(root=tmp_path / "lakehouse")
+
   manifest = run_daily_youtube_collection(
     plan_path=plan_path,
     output_root=tmp_path / "output",
@@ -82,6 +88,7 @@ def test_run_daily_youtube_collection(tmp_path: Path, monkeypatch) -> None:
     comments_per_video=5,
     max_queries_per_run=1,
     lookback_days=7,
+    lakehouse_manager=lakehouse_manager,
   )
 
   assert manifest["queries_executed"] == 1
@@ -91,3 +98,11 @@ def test_run_daily_youtube_collection(tmp_path: Path, monkeypatch) -> None:
   run_dir = Path(tmp_path / "output" / manifest["run_id"])
   assert (run_dir / "manifest.json").exists()
   assert (run_dir / "normalized_comments.json").exists()
+
+  assert manifest["lakehouse_tables"]["bronze_ingestion_runs"] is not None
+  assert manifest["lakehouse_tables"]["gold_collection_daily_summary"] is not None
+  assert manifest["lakehouse_tables"]["gold_query_performance_summary"] is not None
+
+  assert (tmp_path / "lakehouse" / "bronze" / "ingestion_runs").exists()
+  assert (tmp_path / "lakehouse" / "gold" / "collection_daily_summary").exists()
+  assert (tmp_path / "lakehouse" / "gold" / "query_performance_summary").exists()

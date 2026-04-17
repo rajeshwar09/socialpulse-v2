@@ -8,7 +8,10 @@
     "priority": 10,
     "active": true,
     "cadence": "daily",
-    "expected_units": 1200
+    "expected_units": 1200,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-smartphone-camera-01",
@@ -19,7 +22,10 @@
     "priority": 9,
     "active": true,
     "cadence": "daily",
-    "expected_units": 1000
+    "expected_units": 1000,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-laptop-reviews-01",
@@ -30,7 +36,10 @@
     "priority": 9,
     "active": true,
     "cadence": "daily",
-    "expected_units": 1200
+    "expected_units": 1200,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-gaming-laptops-01",
@@ -41,7 +50,10 @@
     "priority": 8,
     "active": true,
     "cadence": "daily",
-    "expected_units": 900
+    "expected_units": 900,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-ott-reviews-01",
@@ -52,7 +64,10 @@
     "priority": 7,
     "active": true,
     "cadence": "daily",
-    "expected_units": 700
+    "expected_units": 700,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-movie-reactions-01",
@@ -63,7 +78,10 @@
     "priority": 7,
     "active": true,
     "cadence": "daily",
-    "expected_units": 700
+    "expected_units": 700,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-budget-phones-01",
@@ -74,7 +92,10 @@
     "priority": 8,
     "active": true,
     "cadence": "daily",
-    "expected_units": 900
+    "expected_units": 900,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-ai-tools-01",
@@ -85,7 +106,10 @@
     "priority": 8,
     "active": true,
     "cadence": "daily",
-    "expected_units": 850
+    "expected_units": 850,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-web-series-01",
@@ -96,7 +120,10 @@
     "priority": 6,
     "active": true,
     "cadence": "daily",
-    "expected_units": 650
+    "expected_units": 650,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   },
   {
     "query_id": "yt-cricket-highlights-01",
@@ -107,6 +134,9 @@
     "priority": 6,
     "active": true,
     "cadence": "daily",
-    "expected_units": 600
+    "expected_units": 600,
+    "search_results_limit": 5,
+    "comments_per_video_limit": 20,
+    "lookback_days": 7
   }
 ]

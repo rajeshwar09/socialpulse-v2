@@ -36,6 +36,7 @@ def main() -> None:
   table.add_column("Value", style="green")
 
   table.add_row("Queries Selected", str(summary.total_queries_selected))
+  table.add_row("Queries Deferred", str(summary.total_queries_deferred))
   table.add_row("Budget Used", str(summary.total_budget_used))
   table.add_row("Budget Available", str(summary.total_budget_available))
   table.add_row("Leftover Budget", str(summary.leftover_budget))

@@ -8,15 +8,8 @@ import pandas as pd
 import pyarrow as pa
 from deltalake.writer import write_deltalake
 
-from socialpulse_v2.core.paths import BRONZE_ROOT, GOLD_ROOT, LAKEHOUSE_ROOT, SILVER_ROOT
+from socialpulse_v2.core.paths import LAKEHOUSE_ROOT
 from socialpulse_v2.schemas.table_specs import TABLE_SPECS, TableSpec
-
-
-ZONE_ROOTS = {
-  "bronze": BRONZE_ROOT,
-  "silver": SILVER_ROOT,
-  "gold": GOLD_ROOT,
-}
 
 
 ARROW_TYPE_MAP = {
@@ -29,14 +22,18 @@ class LakehouseManager:
   def __init__(self, root: Path = LAKEHOUSE_ROOT) -> None:
     self.root = root
 
+  def _zone_root(self, zone: str) -> Path:
+    if zone not in {"bronze", "silver", "gold"}:
+      raise ValueError(f"Unsupported lakehouse zone: {zone}")
+    return self.root / zone
+
   def ensure_zone_dirs(self) -> None:
     self.root.mkdir(parents=True, exist_ok=True)
-    for zone_root in ZONE_ROOTS.values():
-      zone_root.mkdir(parents=True, exist_ok=True)
+    for zone in ("bronze", "silver", "gold"):
+      self._zone_root(zone).mkdir(parents=True, exist_ok=True)
 
   def get_table_path(self, zone: str, table_name: str) -> Path:
-    zone_root = ZONE_ROOTS[zone]
-    return zone_root / table_name
+    return self._zone_root(zone) / table_name
 
   def bootstrap_table(self, spec: TableSpec) -> Path:
     table_path = self.get_table_path(spec.zone, spec.name)
@@ -101,9 +98,9 @@ class LakehouseManager:
     write_deltalake(
       str(table_path),
       arrow_table,
-      mode=mode, # type: ignore
+      mode=mode,  # type: ignore[arg-type]
       partition_by=spec.partition_by,
-    ) # type: ignore
+    )
     return table_path
 
   def describe_tables(self) -> List[dict]:
@@ -121,22 +118,22 @@ class LakehouseManager:
     return descriptions
 
   def _build_arrow_schema(self, spec: TableSpec) -> pa.Schema:
-      fields = []
-      for column_name, type_name in spec.schema_fields.items():
-        fields.append(pa.field(column_name, ARROW_TYPE_MAP[type_name], nullable=True))
-      return pa.schema(fields)
+    fields = []
+    for column_name, type_name in spec.schema_fields.items():
+      fields.append(pa.field(column_name, ARROW_TYPE_MAP[type_name], nullable=True))
+    return pa.schema(fields)
 
   def _align_dataframe_to_spec(self, df: pd.DataFrame, spec: TableSpec) -> pd.DataFrame:
     aligned = df.copy()
 
     for column_name, type_name in spec.schema_fields.items():
-        if column_name not in aligned.columns:
-          aligned[column_name] = pd.NA
+      if column_name not in aligned.columns:
+        aligned[column_name] = pd.NA
 
-        if type_name == "int64":
-          aligned[column_name] = pd.to_numeric(aligned[column_name], errors="coerce").astype("Int64")
-        else:
-          aligned[column_name] = aligned[column_name].astype("string")
+      if type_name == "int64":
+        aligned[column_name] = pd.to_numeric(aligned[column_name], errors="coerce").astype("Int64")
+      else:
+        aligned[column_name] = aligned[column_name].astype("string")
 
     aligned = aligned[list(spec.schema_fields.keys())]
     return aligned

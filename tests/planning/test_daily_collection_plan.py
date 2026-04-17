@@ -4,7 +4,7 @@ import json
 from socialpulse_v2.planning.daily_collection_plan import build_daily_collection_plan
 
 
-def test_daily_collection_plan_respects_budget(tmp_path: Path) -> None:
+def test_daily_collection_plan_respects_budget_and_carries_query_limits(tmp_path: Path) -> None:
   sample = [
     {
       "query_id": "q1",
@@ -16,6 +16,9 @@ def test_daily_collection_plan_respects_budget(tmp_path: Path) -> None:
       "active": True,
       "cadence": "daily",
       "expected_units": 6000,
+      "search_results_limit": 5,
+      "comments_per_video_limit": 20,
+      "lookback_days": 7,
     },
     {
       "query_id": "q2",
@@ -27,6 +30,9 @@ def test_daily_collection_plan_respects_budget(tmp_path: Path) -> None:
       "active": True,
       "cadence": "daily",
       "expected_units": 5000,
+      "search_results_limit": 4,
+      "comments_per_video_limit": 15,
+      "lookback_days": 5,
     },
     {
       "query_id": "q3",
@@ -38,6 +44,9 @@ def test_daily_collection_plan_respects_budget(tmp_path: Path) -> None:
       "active": True,
       "cadence": "daily",
       "expected_units": 3000,
+      "search_results_limit": 3,
+      "comments_per_video_limit": 10,
+      "lookback_days": 3,
     }
   ]
 
@@ -51,5 +60,10 @@ def test_daily_collection_plan_respects_budget(tmp_path: Path) -> None:
   )
 
   assert summary.total_budget_used <= 10000
+  assert summary.total_queries_selected == 2
+  assert summary.total_queries_deferred == 1
   assert "selected" in set(plan_df["status"].tolist())
   assert "deferred_budget_limit" in set(plan_df["status"].tolist())
+  assert "search_results_limit" in plan_df.columns
+  assert "comments_per_video_limit" in plan_df.columns
+  assert "lookback_days" in plan_df.columns

@@ -41,7 +41,20 @@ def main() -> None:
   table.add_row("Run ID", manifest["run_id"])
   table.add_row("Queries Executed", str(manifest["queries_executed"]))
   table.add_row("Total Comments Collected", str(manifest["total_comments_collected"]))
+  table.add_row("Error Count", str(manifest["error_count"]))
   table.add_row("Manifest File", str(Path("data/raw/youtube/daily") / manifest["run_id"] / "manifest.json"))
+  table.add_row(
+    "Bronze Runs Table",
+    str(manifest["lakehouse_tables"].get("bronze_ingestion_runs") or "not_written"),
+  )
+  table.add_row(
+    "Gold Daily Summary",
+    str(manifest["lakehouse_tables"].get("gold_collection_daily_summary") or "not_written"),
+  )
+  table.add_row(
+    "Gold Query Performance",
+    str(manifest["lakehouse_tables"].get("gold_query_performance_summary") or "not_written"),
+  )
 
   console.print(table)
   console.print("[bold green]Daily YouTube collection completed successfully.[/bold green]")

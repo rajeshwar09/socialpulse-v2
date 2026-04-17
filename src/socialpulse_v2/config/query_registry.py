@@ -17,6 +17,9 @@ class QueryDefinition(BaseModel):
   active: bool = True
   cadence: str = "daily"
   expected_units: int = Field(gt=0)
+  search_results_limit: int = Field(default=5, gt=0, le=50)
+  comments_per_video_limit: int = Field(default=20, gt=0, le=100)
+  lookback_days: int = Field(default=7, gt=0, le=30)
 
 
 def load_query_registry(path: Path) -> List[QueryDefinition]:
