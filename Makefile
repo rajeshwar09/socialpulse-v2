@@ -1,4 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube tree
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan  run-daily-youtube tree  run-predictive test-gold
 
 install:
 	pip install -r requirements.txt
@@ -40,8 +40,14 @@ run-kafka-producer:
 run-kafka-consumer:
 	python -m socialpulse_v2.orchestration.consume_youtube_comments_to_bronze
 
-tree:
-	find . -maxdepth 4 | sort
 run-silver-youtube-comments:
 	python -m socialpulse_v2.orchestration.run_silver_youtube_comments
 
+run-predictive:
+	python -m socialpulse_v2.orchestration.run_gold_youtube_comments_predictive
+
+test-gold:
+	pytest -q tests/gold
+
+tree:
+	find . -maxdepth 4 | sort
