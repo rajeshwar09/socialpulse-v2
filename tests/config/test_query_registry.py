@@ -15,7 +15,7 @@ def test_load_query_registry_defaults_collection_limits(tmp_path: Path) -> None:
       "priority": 10,
       "active": True,
       "cadence": "daily",
-      "expected_units": 1000,
+      "expected_units": 100,
     }
   ]
 
@@ -41,7 +41,7 @@ def test_get_active_queries_filters_platform(tmp_path: Path) -> None:
       "priority": 10,
       "active": True,
       "cadence": "daily",
-      "expected_units": 1000,
+      "expected_units": 100,
       "search_results_limit": 4,
       "comments_per_video_limit": 15,
       "lookback_days": 5,
@@ -55,7 +55,7 @@ def test_get_active_queries_filters_platform(tmp_path: Path) -> None:
       "priority": 8,
       "active": True,
       "cadence": "daily",
-      "expected_units": 700,
+      "expected_units": 80,
       "search_results_limit": 4,
       "comments_per_video_limit": 15,
       "lookback_days": 5,
