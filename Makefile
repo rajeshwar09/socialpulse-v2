@@ -1,4 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree run-gold-youtube-sentiment-all
 
 install:
 	pip install -r requirements.txt
@@ -60,6 +60,10 @@ run-predictive:
 
 test-gold:
 	pytest -q tests/gold
+
+run-gold-youtube-sentiment-all:
+	$(MAKE) run-gold-youtube-sentiment
+	$(MAKE) run-gold-youtube-sentiment-descriptive
 
 tree:
 	find . -maxdepth 4 | sort

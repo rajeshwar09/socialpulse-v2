@@ -112,7 +112,35 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
   query_df = _read_delta_table(gold_root / "query_performance_summary")
   comments_df = _normalize_comment_columns(_read_comment_level_data(gold_root))
 
-  for frame in [overview_df, collection_df, query_df]:
+  sentiment_daily_summary_df = _read_delta_table(gold_root / "youtube_sentiment_daily_summary")
+  sentiment_video_summary_df = _read_delta_table(gold_root / "youtube_sentiment_video_summary")
+  sentiment_topic_summary_df = _read_delta_table(gold_root / "youtube_sentiment_topic_summary")
+  sentiment_daily_trend_df = _read_delta_table(gold_root / "youtube_sentiment_daily_trend")
+  sentiment_weekday_hour_df = _read_delta_table(gold_root / "youtube_sentiment_weekday_hour_engagement")
+  sentiment_keyword_df = _read_delta_table(gold_root / "youtube_sentiment_keyword_frequency")
+  sentiment_overview_kpis_df = _read_delta_table(gold_root / "youtube_sentiment_overview_kpis")
+
+  sentiment_frames_with_date = [
+    sentiment_daily_summary_df,
+    sentiment_video_summary_df,
+    sentiment_daily_trend_df,
+    sentiment_weekday_hour_df,
+    sentiment_keyword_df,
+    sentiment_overview_kpis_df,
+  ]
+
+  for frame in sentiment_frames_with_date:
+    if not frame.empty and "collection_date" in frame.columns:
+      frame["collection_date"] = pd.to_datetime(frame["collection_date"], errors="coerce")
+      frame["collection_date_label"] = frame["collection_date"].dt.strftime("%Y-%m-%d")
+
+  standard_frames_with_run_date = [
+    overview_df,
+    collection_df,
+    query_df,
+  ]
+
+  for frame in standard_frames_with_run_date:
     if not frame.empty and "run_date" in frame.columns:
       frame["run_date"] = pd.to_datetime(frame["run_date"], errors="coerce")
       frame["run_date_label"] = frame["run_date"].dt.strftime("%Y-%m-%d")
@@ -165,6 +193,13 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
     "collection": collection_df,
     "query": query_df,
     "comments": comments_df,
+    "sentiment_daily_summary": sentiment_daily_summary_df,
+    "sentiment_video_summary": sentiment_video_summary_df,
+    "sentiment_topic_summary": sentiment_topic_summary_df,
+    "sentiment_daily_trend": sentiment_daily_trend_df,
+    "sentiment_weekday_hour_engagement": sentiment_weekday_hour_df,
+    "sentiment_keyword_frequency": sentiment_keyword_df,
+    "sentiment_overview_kpis": sentiment_overview_kpis_df,
   }
 
 
@@ -223,6 +258,78 @@ def apply_dashboard_filters(
 
   return filtered_collection, filtered_query, filtered_comments
 
+def _filter_sentiment_frame(
+  df: pd.DataFrame,
+  selected_topics: list[str],
+  selected_genres: list[str],
+  start_date,
+  end_date,
+  date_column: str = "collection_date",
+) -> pd.DataFrame:
+  if df.empty:
+    return df.copy()
+
+  filtered = df.copy()
+
+  if selected_topics and "topic" in filtered.columns:
+    filtered = filtered[filtered["topic"].isin(selected_topics)]
+
+  if selected_genres and "genre" in filtered.columns:
+    filtered = filtered[filtered["genre"].isin(selected_genres)]
+
+  if date_column in filtered.columns:
+    filtered[date_column] = pd.to_datetime(filtered[date_column], errors="coerce")
+
+    if start_date is not None:
+      filtered = filtered[filtered[date_column] >= pd.Timestamp(start_date)]
+
+    if end_date is not None:
+      filtered = filtered[filtered[date_column] <= pd.Timestamp(end_date)]
+
+  return filtered
+
+
+def apply_sentiment_gold_filters(
+  sentiment_daily_summary_df: pd.DataFrame,
+  sentiment_video_summary_df: pd.DataFrame,
+  sentiment_topic_summary_df: pd.DataFrame,
+  sentiment_daily_trend_df: pd.DataFrame,
+  sentiment_weekday_hour_df: pd.DataFrame,
+  sentiment_keyword_df: pd.DataFrame,
+  sentiment_overview_kpis_df: pd.DataFrame,
+  selected_topics: list[str],
+  selected_genres: list[str],
+  start_date,
+  end_date,
+) -> dict[str, pd.DataFrame]:
+  filtered_topic_summary = sentiment_topic_summary_df.copy()
+  if not filtered_topic_summary.empty:
+    if selected_topics and "topic" in filtered_topic_summary.columns:
+      filtered_topic_summary = filtered_topic_summary[filtered_topic_summary["topic"].isin(selected_topics)]
+    if selected_genres and "genre" in filtered_topic_summary.columns:
+      filtered_topic_summary = filtered_topic_summary[filtered_topic_summary["genre"].isin(selected_genres)]
+
+  return {
+    "sentiment_daily_summary": _filter_sentiment_frame(
+      sentiment_daily_summary_df, selected_topics, selected_genres, start_date, end_date
+    ),
+    "sentiment_video_summary": _filter_sentiment_frame(
+      sentiment_video_summary_df, selected_topics, selected_genres, start_date, end_date
+    ),
+    "sentiment_topic_summary": filtered_topic_summary,
+    "sentiment_daily_trend": _filter_sentiment_frame(
+      sentiment_daily_trend_df, selected_topics, selected_genres, start_date, end_date
+    ),
+    "sentiment_weekday_hour_engagement": _filter_sentiment_frame(
+      sentiment_weekday_hour_df, selected_topics, selected_genres, start_date, end_date
+    ),
+    "sentiment_keyword_frequency": _filter_sentiment_frame(
+      sentiment_keyword_df, selected_topics, selected_genres, start_date, end_date
+    ),
+    "sentiment_overview_kpis": _filter_sentiment_frame(
+      sentiment_overview_kpis_df, selected_topics, selected_genres, start_date, end_date
+    ),
+  }
 
 def build_prescriptive_recommendations(query_df: pd.DataFrame) -> list[str]:
   recommendations: list[str] = []
@@ -259,7 +366,7 @@ def build_prescriptive_recommendations(query_df: pd.DataFrame) -> list[str]:
     top_no_data = (
       no_data_df.groupby("topic", as_index=False)["query_id"]
       .count()
-      .rename(columns={"query_id": "count"})
+      .rename(columns={"query_id": "count"}) # type: ignore
       .sort_values("count", ascending=False)
       .head(3)
     )
@@ -272,7 +379,7 @@ def build_prescriptive_recommendations(query_df: pd.DataFrame) -> list[str]:
     top_failed = (
       failed_df.groupby("topic", as_index=False)["query_id"]
       .count()
-      .rename(columns={"query_id": "count"})
+      .rename(columns={"query_id": "count"}) # type: ignore
       .sort_values("count", ascending=False)
       .head(3)
     )
@@ -296,7 +403,7 @@ def build_prescriptive_recommendations(query_df: pd.DataFrame) -> list[str]:
   strong_topics = (
     working_df.groupby("topic", as_index=False)["records_written"]
     .sum()
-    .sort_values("records_written", ascending=False)
+    .sort_values("records_written", ascending=False) # type: ignore
     .head(3)
   )
 
