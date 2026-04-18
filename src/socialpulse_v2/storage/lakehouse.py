@@ -15,6 +15,13 @@ from socialpulse_v2.schemas.table_specs import TABLE_SPECS, TableSpec
 ARROW_TYPE_MAP = {
   "string": pa.string(),
   "int64": pa.int64(),
+  "int32": pa.int32(),
+  "bool": pa.bool_(),
+  "timestamp": pa.timestamp("us"),
+  "float64": pa.float64(),
+  "float32": pa.float32(),
+  "double": pa.float64(),
+  "float": pa.float32(),
 }
 
 
@@ -120,6 +127,8 @@ class LakehouseManager:
   def _build_arrow_schema(self, spec: TableSpec) -> pa.Schema:
     fields = []
     for column_name, type_name in spec.schema_fields.items():
+      if type_name not in ARROW_TYPE_MAP:
+        raise KeyError(f"Unsupported Arrow type in schema: {type_name}")
       fields.append(pa.field(column_name, ARROW_TYPE_MAP[type_name], nullable=True))
     return pa.schema(fields)
 
@@ -130,8 +139,18 @@ class LakehouseManager:
       if column_name not in aligned.columns:
         aligned[column_name] = pd.NA
 
-      if type_name == "int64":
+      if type_name in {"int64", "int32"}:
         aligned[column_name] = pd.to_numeric(aligned[column_name], errors="coerce").astype("Int64")
+
+      elif type_name in {"float64", "float32", "double", "float"}:
+        aligned[column_name] = pd.to_numeric(aligned[column_name], errors="coerce").astype("float64")
+
+      elif type_name == "bool":
+        aligned[column_name] = aligned[column_name].astype("boolean")
+
+      elif type_name == "timestamp":
+        aligned[column_name] = pd.to_datetime(aligned[column_name], errors="coerce", utc=True)
+
       else:
         aligned[column_name] = aligned[column_name].astype("string")
 
