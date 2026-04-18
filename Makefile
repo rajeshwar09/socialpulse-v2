@@ -1,4 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan  run-daily-youtube tree  run-predictive test-gold
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree
 
 install:
 	pip install -r requirements.txt
@@ -8,22 +8,22 @@ test:
 	pytest -q
 
 run-dashboard:
-	python -m streamlit run src/socialpulse_v2/dashboard/app.py
+	PYTHONPATH=src python -m streamlit run src/socialpulse_v2/dashboard/app.py
 
 run-lakehouse-bootstrap:
-	python -m socialpulse_v2.orchestration.bootstrap_lakehouse
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.bootstrap_lakehouse
 
 run-historical-bootstrap:
-	python -m socialpulse_v2.orchestration.bootstrap_historical_youtube
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.bootstrap_historical_youtube
 
 run-daily-plan:
-	python -m socialpulse_v2.orchestration.plan_daily_collection
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.plan_daily_collection
 
 run-daily-youtube:
-	python -m socialpulse_v2.orchestration.run_daily_youtube_collection
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_daily_youtube_collection
 
 run-bronze-daily-ingestion:
-	python -m socialpulse_v2.orchestration.run_bronze_daily_ingestion
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_bronze_daily_ingestion
 
 kafka-up:
 	docker compose -f docker-compose.kafka.yml up -d
@@ -35,16 +35,28 @@ kafka-logs:
 	docker compose -f docker-compose.kafka.yml logs -f kafka
 
 run-kafka-producer:
-	python -m socialpulse_v2.orchestration.publish_youtube_comments_to_kafka
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.publish_youtube_comments_to_kafka
 
 run-kafka-consumer:
-	python -m socialpulse_v2.orchestration.consume_youtube_comments_to_bronze
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.consume_youtube_comments_to_bronze
 
 run-silver-youtube-comments:
-	python -m socialpulse_v2.orchestration.run_silver_youtube_comments
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_silver_youtube_comments
+
+run-silver-youtube-sentiment:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_silver_youtube_comments_sentiment
+
+run-gold-youtube-sentiment:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_gold_youtube_sentiment
+
+run-gold-daily-overview:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_gold_daily_overview
+
+run-gold-youtube-sentiment-descriptive:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_gold_youtube_sentiment_descriptive
 
 run-predictive:
-	python -m socialpulse_v2.orchestration.run_gold_youtube_comments_predictive
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_gold_youtube_comments_predictive
 
 test-gold:
 	pytest -q tests/gold
