@@ -50,3 +50,5 @@ data/lakehouse/*
 .pytest_cache/
 .coverage
 htmlcov/
+
+backups

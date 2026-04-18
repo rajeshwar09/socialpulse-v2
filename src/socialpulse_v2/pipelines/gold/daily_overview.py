@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 from deltalake import DeltaTable
@@ -8,143 +8,130 @@ from deltalake import DeltaTable
 from socialpulse_v2.storage.lakehouse import LakehouseManager
 
 
-def _safe_pct(numerator: int, denominator: int) -> int:
-  if denominator <= 0:
-    return 0
-  return int(round((numerator / denominator) * 100))
+def _read_delta_if_exists(path: Path) -> pd.DataFrame:
+  if not path.exists():
+    return pd.DataFrame()
+  return DeltaTable(str(path)).to_pandas()
 
 
 def build_daily_overview_tables(
   lakehouse_manager: LakehouseManager | None = None,
-) -> dict[str, str | int]:
+) -> dict[str, object]:
+  """
+  Backward-compatible wrapper used by run_gold_daily_overview.py.
+
+  Instead of writing deprecated tables like:
+    - gold.overview_daily_kpis
+    - gold.topic_daily_kpis
+
+  this function now builds and writes only:
+    - gold.dashboard_overview_daily
+  """
   manager = lakehouse_manager or LakehouseManager()
   manager.ensure_zone_dirs()
 
-  source_path = manager.get_table_path("gold", "query_performance_summary")
-  if not source_path.exists():
-    raise FileNotFoundError(
-      "gold.query_performance_summary does not exist. Run daily collection first."
+  collection_path = manager.get_table_path("gold", "collection_daily_summary")
+  query_perf_path = manager.get_table_path("gold", "query_performance_summary")
+
+  collection_df = _read_delta_if_exists(collection_path)
+  query_df = _read_delta_if_exists(query_perf_path)
+
+  if collection_df.empty or query_df.empty:
+    return {
+      "rows_written": 0,
+      "table_path": str(manager.get_table_path("gold", "dashboard_overview_daily")),
+      "status": "skipped_missing_inputs",
+      "message": "collection_daily_summary or query_performance_summary is missing/empty.",
+    }
+
+  collection_df["run_date"] = collection_df["run_date"].astype(str)
+  query_df["run_date"] = query_df["run_date"].astype(str)
+  query_df["collection_status"] = query_df["collection_status"].astype(str)
+
+  daily_collection = (
+    collection_df
+    .groupby(["run_date", "source_name", "ingestion_mode"], as_index=False)
+    .agg(
+      topics_covered=("topic", "nunique"),
+      genres_covered=("genre", "nunique"),
+      queries_executed=("queries_executed", "sum"),
+      total_videos_fetched=("total_videos_fetched", "sum"),
+      total_records_fetched=("total_records_fetched", "sum"),
+      total_records_written=("total_records_written", "sum"),
+      total_error_count=("total_error_count", "sum"),
+      created_at=("created_at", "max"),
     )
+  )
 
-  source_df = DeltaTable(str(source_path)).to_pandas()
-  if source_df.empty:
-    raise ValueError("gold.query_performance_summary is empty.")
-
-  created_at = datetime.now(UTC).isoformat()
-
-  for col in [
-    "videos_fetched",
-    "records_fetched",
-    "records_written",
-    "error_count",
-  ]:
-    source_df[col] = pd.to_numeric(source_df[col], errors="coerce").fillna(0).astype(int)
-
-  source_df["is_success"] = (source_df["collection_status"] == "success").astype(int)
-  source_df["is_partial_success"] = (source_df["collection_status"] == "partial_success").astype(int)
-  source_df["is_failed"] = (source_df["collection_status"] == "failed").astype(int)
-  source_df["is_no_data"] = (source_df["collection_status"] == "no_data").astype(int)
-
-  overview_df = (
-    source_df
+  status_summary = (
+    query_df
     .groupby(["run_date"], as_index=False)
     .agg(
-      queries_executed=("query_id", "count"),
-      successful_queries=("is_success", "sum"),
-      partial_success_queries=("is_partial_success", "sum"),
-      failed_queries=("is_failed", "sum"),
-      no_data_queries=("is_no_data", "sum"),
-      total_videos_fetched=("videos_fetched", "sum"),
-      total_records_fetched=("records_fetched", "sum"),
-      total_records_written=("records_written", "sum"),
-      total_error_count=("error_count", "sum"),
+      successful_queries=("collection_status", lambda s: int((s == "success").sum())),
+      partial_success_queries=("collection_status", lambda s: int((s == "partial_success").sum())),
+      failed_queries=("collection_status", lambda s: int((s == "failed").sum())),
+      no_data_queries=("collection_status", lambda s: int((s == "no_data").sum())),
+      unique_queries_seen=("query_id", "nunique"),
     )
   )
 
-  overview_df["source_name"] = "youtube"
-  overview_df["ingestion_mode"] = "daily_api"
-  overview_df["success_rate_pct"] = overview_df.apply(
-    lambda row: _safe_pct(
-      int(row["successful_queries"]) + int(row["partial_success_queries"]),
-      int(row["queries_executed"]),
-    ),
-    axis=1,
+  overview_df = daily_collection.merge(
+    status_summary,
+    on="run_date",
+    how="left",
   )
-  overview_df["created_at"] = created_at
+
+  int_columns = [
+    "topics_covered",
+    "genres_covered",
+    "queries_executed",
+    "total_videos_fetched",
+    "total_records_fetched",
+    "total_records_written",
+    "total_error_count",
+    "successful_queries",
+    "partial_success_queries",
+    "failed_queries",
+    "no_data_queries",
+    "unique_queries_seen",
+  ]
+
+  for column in int_columns:
+    overview_df[column] = (
+      pd.to_numeric(overview_df[column], errors="coerce")
+      .fillna(0)
+      .astype("int64")
+    )
 
   overview_df = overview_df[
     [
       "run_date",
       "source_name",
       "ingestion_mode",
+      "topics_covered",
+      "genres_covered",
       "queries_executed",
       "successful_queries",
       "partial_success_queries",
       "failed_queries",
       "no_data_queries",
-      "total_videos_fetched",
-      "total_records_fetched",
-      "total_records_written",
-      "total_error_count",
-      "success_rate_pct",
-      "created_at",
-    ]
-  ]
-
-  topic_df = (
-    source_df
-    .groupby(["run_date", "topic", "genre"], as_index=False)
-    .agg(
-      queries_executed=("query_id", "count"),
-      successful_queries=("is_success", "sum"),
-      partial_success_queries=("is_partial_success", "sum"),
-      failed_queries=("is_failed", "sum"),
-      no_data_queries=("is_no_data", "sum"),
-      total_videos_fetched=("videos_fetched", "sum"),
-      total_records_fetched=("records_fetched", "sum"),
-      total_records_written=("records_written", "sum"),
-      total_error_count=("error_count", "sum"),
-    )
-  )
-
-  topic_df["source_name"] = "youtube"
-  topic_df["ingestion_mode"] = "daily_api"
-  topic_df["created_at"] = created_at
-
-  topic_df = topic_df[
-    [
-      "run_date",
-      "source_name",
-      "ingestion_mode",
-      "topic",
-      "genre",
-      "queries_executed",
-      "successful_queries",
-      "partial_success_queries",
-      "failed_queries",
-      "no_data_queries",
+      "unique_queries_seen",
       "total_videos_fetched",
       "total_records_fetched",
       "total_records_written",
       "total_error_count",
       "created_at",
     ]
-  ]
+  ].sort_values(["run_date", "source_name", "ingestion_mode"])
 
-  overview_path = manager.write_dataframe(
-    "gold.overview_daily_kpis",
+  table_path = manager.write_dataframe(
+    "gold.dashboard_overview_daily",
     overview_df,
-    mode="overwrite",
-  )
-  topic_path = manager.write_dataframe(
-    "gold.topic_daily_kpis",
-    topic_df,
     mode="overwrite",
   )
 
   return {
-    "overview_daily_rows": len(overview_df),
-    "topic_daily_rows": len(topic_df),
-    "overview_daily_path": str(overview_path),
-    "topic_daily_path": str(topic_path),
+    "rows_written": int(len(overview_df)),
+    "table_path": str(table_path),
+    "status": "success",
   }
