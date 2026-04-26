@@ -66,7 +66,13 @@ def _prepare_sentiment_df(sentiment_df: pd.DataFrame) -> pd.DataFrame:
       df[column] = 0
     df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0).astype("int64")
 
-  float_columns = ["sentiment_score"]
+  float_columns = [
+    "sentiment_score",
+    "sentiment_confidence",
+    "sentiment_negative_prob",
+    "sentiment_neutral_prob",
+    "sentiment_positive_prob",
+  ]
   for column in float_columns:
     if column not in df.columns:
       df[column] = 0.0
@@ -84,6 +90,8 @@ def _prepare_sentiment_df(sentiment_df: pd.DataFrame) -> pd.DataFrame:
     "comment_id",
     "comment_text",
     "sentiment_label",
+    "sentiment_backend",
+    "sentiment_model",
   ]
   for column in string_columns:
     if column not in df.columns:
@@ -119,6 +127,10 @@ def build_youtube_sentiment_topic_summary(sentiment_df: pd.DataFrame) -> pd.Data
     "neutral_comments",
     "negative_comments",
     "avg_sentiment_score",
+    "avg_sentiment_confidence",
+    "avg_negative_probability",
+    "avg_neutral_probability",
+    "avg_positive_probability",
     "positive_ratio",
     "negative_ratio",
     "total_comment_likes",
@@ -141,12 +153,20 @@ def build_youtube_sentiment_topic_summary(sentiment_df: pd.DataFrame) -> pd.Data
       neutral_comments=("is_neutral", "sum"),
       negative_comments=("is_negative", "sum"),
       avg_sentiment_score=("sentiment_score", "mean"),
+      avg_sentiment_confidence=("sentiment_confidence", "mean"),
+      avg_negative_probability=("sentiment_negative_prob", "mean"),
+      avg_neutral_probability=("sentiment_neutral_prob", "mean"),
+      avg_positive_probability=("sentiment_positive_prob", "mean"),
       total_comment_likes=("comment_like_count", "sum"),
       avg_comment_likes=("comment_like_count", "mean"),
     )
   )
 
   topic_df["avg_sentiment_score"] = topic_df["avg_sentiment_score"].round(4)
+  topic_df["avg_sentiment_confidence"] = topic_df["avg_sentiment_confidence"].round(4)
+  topic_df["avg_negative_probability"] = topic_df["avg_negative_probability"].round(4)
+  topic_df["avg_neutral_probability"] = topic_df["avg_neutral_probability"].round(4)
+  topic_df["avg_positive_probability"] = topic_df["avg_positive_probability"].round(4)
   topic_df["avg_comment_likes"] = topic_df["avg_comment_likes"].round(4)
   topic_df["positive_ratio"] = _safe_ratio(topic_df["positive_comments"], topic_df["comments_count"])
   topic_df["negative_ratio"] = _safe_ratio(topic_df["negative_comments"], topic_df["comments_count"])
@@ -166,6 +186,10 @@ def build_youtube_sentiment_daily_trend(sentiment_df: pd.DataFrame) -> pd.DataFr
     "neutral_comments",
     "negative_comments",
     "avg_sentiment_score",
+    "avg_sentiment_confidence",
+    "avg_negative_probability",
+    "avg_neutral_probability",
+    "avg_positive_probability",
     "positive_ratio",
     "negative_ratio",
     "total_comment_likes",
@@ -187,12 +211,20 @@ def build_youtube_sentiment_daily_trend(sentiment_df: pd.DataFrame) -> pd.DataFr
       neutral_comments=("is_neutral", "sum"),
       negative_comments=("is_negative", "sum"),
       avg_sentiment_score=("sentiment_score", "mean"),
+      avg_sentiment_confidence=("sentiment_confidence", "mean"),
+      avg_negative_probability=("sentiment_negative_prob", "mean"),
+      avg_neutral_probability=("sentiment_neutral_prob", "mean"),
+      avg_positive_probability=("sentiment_positive_prob", "mean"),
       total_comment_likes=("comment_like_count", "sum"),
       avg_comment_likes=("comment_like_count", "mean"),
     )
   )
 
   trend_df["avg_sentiment_score"] = trend_df["avg_sentiment_score"].round(4)
+  trend_df["avg_sentiment_confidence"] = trend_df["avg_sentiment_confidence"].round(4)
+  trend_df["avg_negative_probability"] = trend_df["avg_negative_probability"].round(4)
+  trend_df["avg_neutral_probability"] = trend_df["avg_neutral_probability"].round(4)
+  trend_df["avg_positive_probability"] = trend_df["avg_positive_probability"].round(4)
   trend_df["avg_comment_likes"] = trend_df["avg_comment_likes"].round(4)
   trend_df["positive_ratio"] = _safe_ratio(trend_df["positive_comments"], trend_df["comments_count"])
   trend_df["negative_ratio"] = _safe_ratio(trend_df["negative_comments"], trend_df["comments_count"])
@@ -202,75 +234,40 @@ def build_youtube_sentiment_daily_trend(sentiment_df: pd.DataFrame) -> pd.DataFr
 
 
 def build_youtube_sentiment_weekday_hour_engagement(sentiment_df: pd.DataFrame) -> pd.DataFrame:
+  columns = [
+    "collection_date",
+    "topic",
+    "genre",
+    "weekday_name",
+    "comment_hour_24",
+    "comments_count",
+    "avg_sentiment_score",
+    "avg_sentiment_confidence",
+    "avg_negative_probability",
+    "avg_neutral_probability",
+    "avg_positive_probability",
+    "positive_comments",
+    "neutral_comments",
+    "negative_comments",
+    "total_comment_likes",
+    "avg_comment_likes",
+    "built_at",
+  ]
   if sentiment_df.empty:
-    return pd.DataFrame(
-      columns=[
-        "collection_date",
-        "topic",
-        "genre",
-        "weekday_name",
-        "comment_hour_24",
-        "comments_count",
-        "avg_sentiment_score",
-        "positive_comments",
-        "neutral_comments",
-        "negative_comments",
-        "total_comment_likes",
-        "avg_comment_likes",
-        "built_at",
-      ]
-    )
+    return pd.DataFrame(columns=columns)
 
-  working_df = sentiment_df.copy()
-  built_at = datetime.now(UTC).isoformat()
-  working_df["comment_published_at"] = pd.to_datetime(
-    working_df["comment_published_at"],
-    errors="coerce",
-    utc=True,
-  )
-
+  working_df = _prepare_sentiment_df(sentiment_df)
+  built_at = _now_iso()
   working_df = working_df.dropna(subset=["comment_published_at"]).copy()
 
   if working_df.empty:
-    return pd.DataFrame(
-      columns=[
-        "collection_date",
-        "topic",
-        "genre",
-        "weekday_name",
-        "comment_hour_24",
-        "comments_count",
-        "avg_sentiment_score",
-        "positive_comments",
-        "neutral_comments",
-        "negative_comments",
-        "total_comment_likes",
-        "avg_comment_likes",
-        "built_at",
-      ]
-    )
-
-  working_df["weekday_name"] = pd.Categorical(
-    working_df["comment_published_at"].dt.day_name(),
-    categories=WEEKDAY_ORDER,
-    ordered=True,
-  )
+    return pd.DataFrame(columns=columns)
 
   working_df["comment_hour_24"] = (
     pd.to_numeric(working_df["comment_published_at"].dt.hour, errors="coerce")
     .fillna(0)
     .astype("int64")
   )
-
-  working_df["comment_like_count"] = (
-    pd.to_numeric(working_df.get("comment_like_count", 0), errors="coerce")
-    .fillna(0) # type: ignore
-    .astype("int64")
-  )
-
-  working_df["is_positive"] = (working_df["sentiment_label"] == "positive").astype("int64")
-  working_df["is_neutral"] = (working_df["sentiment_label"] == "neutral").astype("int64")
-  working_df["is_negative"] = (working_df["sentiment_label"] == "negative").astype("int64")
 
   grouped_df = (
     working_df.groupby(
@@ -281,6 +278,10 @@ def build_youtube_sentiment_weekday_hour_engagement(sentiment_df: pd.DataFrame) 
     .agg(
       comments_count=("comment_id", "nunique"),
       avg_sentiment_score=("sentiment_score", "mean"),
+      avg_sentiment_confidence=("sentiment_confidence", "mean"),
+      avg_negative_probability=("sentiment_negative_prob", "mean"),
+      avg_neutral_probability=("sentiment_neutral_prob", "mean"),
+      avg_positive_probability=("sentiment_positive_prob", "mean"),
       positive_comments=("is_positive", "sum"),
       neutral_comments=("is_neutral", "sum"),
       negative_comments=("is_negative", "sum"),
@@ -294,13 +295,18 @@ def build_youtube_sentiment_weekday_hour_engagement(sentiment_df: pd.DataFrame) 
   )
 
   grouped_df["avg_sentiment_score"] = grouped_df["avg_sentiment_score"].round(4)
+  grouped_df["avg_sentiment_confidence"] = grouped_df["avg_sentiment_confidence"].round(4)
+  grouped_df["avg_negative_probability"] = grouped_df["avg_negative_probability"].round(4)
+  grouped_df["avg_neutral_probability"] = grouped_df["avg_neutral_probability"].round(4)
+  grouped_df["avg_positive_probability"] = grouped_df["avg_positive_probability"].round(4)
   grouped_df["avg_comment_likes"] = grouped_df["avg_comment_likes"].round(4)
   grouped_df["built_at"] = built_at
 
-  return grouped_df
+  return grouped_df[columns]
+
 
 def _tokenize(text: object) -> list[str]:
-  if text is None or pd.isna(text): # type: ignore
+  if text is None or pd.isna(text):
     return []
 
   tokens = re.findall(r"[a-z0-9]+", str(text).lower())
@@ -384,6 +390,10 @@ def build_youtube_sentiment_overview_kpis(sentiment_df: pd.DataFrame) -> pd.Data
     "neutral_comments",
     "negative_comments",
     "avg_sentiment_score",
+    "avg_sentiment_confidence",
+    "avg_negative_probability",
+    "avg_neutral_probability",
+    "avg_positive_probability",
     "positive_ratio",
     "negative_ratio",
     "total_comment_likes",
@@ -407,12 +417,20 @@ def build_youtube_sentiment_overview_kpis(sentiment_df: pd.DataFrame) -> pd.Data
       neutral_comments=("is_neutral", "sum"),
       negative_comments=("is_negative", "sum"),
       avg_sentiment_score=("sentiment_score", "mean"),
+      avg_sentiment_confidence=("sentiment_confidence", "mean"),
+      avg_negative_probability=("sentiment_negative_prob", "mean"),
+      avg_neutral_probability=("sentiment_neutral_prob", "mean"),
+      avg_positive_probability=("sentiment_positive_prob", "mean"),
       total_comment_likes=("comment_like_count", "sum"),
       avg_comment_likes=("comment_like_count", "mean"),
     )
   )
 
   overview_df["avg_sentiment_score"] = overview_df["avg_sentiment_score"].round(4)
+  overview_df["avg_sentiment_confidence"] = overview_df["avg_sentiment_confidence"].round(4)
+  overview_df["avg_negative_probability"] = overview_df["avg_negative_probability"].round(4)
+  overview_df["avg_neutral_probability"] = overview_df["avg_neutral_probability"].round(4)
+  overview_df["avg_positive_probability"] = overview_df["avg_positive_probability"].round(4)
   overview_df["avg_comment_likes"] = overview_df["avg_comment_likes"].round(4)
   overview_df["positive_ratio"] = _safe_ratio(overview_df["positive_comments"], overview_df["comments_count"])
   overview_df["negative_ratio"] = _safe_ratio(overview_df["negative_comments"], overview_df["comments_count"])
