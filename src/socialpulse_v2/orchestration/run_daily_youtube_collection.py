@@ -15,11 +15,13 @@ def main() -> None:
   configure_logging(settings.log_level)
   console = Console()
 
-  api_key = os.getenv("YOUTUBE_API_KEY", "")
-  search_results_per_query = int(os.getenv("YOUTUBE_SEARCH_RESULTS_PER_QUERY", "5"))
-  comments_per_video = int(os.getenv("YOUTUBE_COMMENTS_PER_VIDEO", "20"))
-  max_queries_per_run = int(os.getenv("YOUTUBE_MAX_QUERIES_PER_RUN", "3"))
-  lookback_days = int(os.getenv("YOUTUBE_PUBLISHED_LOOKBACK_DAYS", "7"))
+  api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
+  search_results_per_query = int(os.getenv("YOUTUBE_SEARCH_RESULTS_PER_QUERY", "25"))
+  comments_per_video = int(os.getenv("YOUTUBE_COMMENTS_PER_VIDEO", "100"))
+  lookback_days = int(os.getenv("YOUTUBE_PUBLISHED_LOOKBACK_DAYS", "30"))
+
+  raw_max_queries = os.getenv("YOUTUBE_MAX_QUERIES_PER_RUN", "").strip()
+  max_queries_per_run = int(raw_max_queries) if raw_max_queries else None
 
   if not api_key:
     raise ValueError("YOUTUBE_API_KEY is missing. Add it to your .env file before running this command.")

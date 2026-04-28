@@ -13,8 +13,8 @@ from socialpulse_v2.dashboard.components import (
 from socialpulse_v2.dashboard.data_access import (
   apply_dashboard_filters,
   apply_sentiment_gold_filters,
-  build_prescriptive_recommendations,
   load_dashboard_tables,
+  resolve_analysis_query,
 )
 
 
@@ -56,149 +56,103 @@ def format_pct(value: float | int) -> str:
   return f"{float(value) * 100:.1f}%"
 
 
+def pretty_text(value: object) -> str:
+  return str(value).replace("_", " ").title()
+
+
 @st.cache_data(show_spinner=False)
 def get_data() -> dict[str, pd.DataFrame]:
   return load_dashboard_tables()
 
 
-def build_diagnostic_insights(query_df: pd.DataFrame) -> list[str]:
-  insights: list[str] = []
-
-  if query_df.empty:
-    return ["No diagnostic insight can be generated because no query-level performance data is available."]
-
-  diagnostic_df = query_df.copy()
-  diagnostic_df["efficiency_ratio"] = diagnostic_df.apply(
-    lambda row: (row["records_written"] / row["expected_units"]) if row["expected_units"] > 0 else 0,
-    axis=1,
-  )
-
-  weakest_topics = (
-    diagnostic_df.groupby("topic", as_index=False)
-    .agg(
-      expected_units=("expected_units", "sum"),
-      records_written=("records_written", "sum"),
-      no_data_runs=("collection_status", lambda s: int((s == "no_data").sum())),
-    )
-  )
-  weakest_topics["efficiency_ratio"] = weakest_topics.apply(
-    lambda row: (row["records_written"] / row["expected_units"]) if row["expected_units"] > 0 else 0,
-    axis=1,
-  )
-  weakest_topics = weakest_topics.sort_values(["efficiency_ratio", "no_data_runs"], ascending=[True, False])
-
-  if not weakest_topics.empty:
-    row = weakest_topics.iloc[0]
-    insights.append(
-      f"The weakest topic in the current filtered view is '{row['topic']}'. It delivered only {int(row['records_written'])} records against an expected {int(row['expected_units'])}, giving an efficiency ratio of {row['efficiency_ratio']:.2f}."
-    )
-
-  strongest_topics = weakest_topics.sort_values(["efficiency_ratio", "records_written"], ascending=[False, False])
-  if not strongest_topics.empty:
-    row = strongest_topics.iloc[0]
-    insights.append(
-      f"The strongest topic is '{row['topic']}', which is currently converting expected collection volume into actual records more effectively than the rest of the filtered topics."
-    )
-
-  repeated_no_data = (
-    diagnostic_df[diagnostic_df["collection_status"] == "no_data"]
-    .groupby(["query_id", "topic"], as_index=False)
-    .size()
-    .rename(columns={"size": "no_data_runs"})
-    .sort_values("no_data_runs", ascending=False)
-  )
-  if not repeated_no_data.empty:
-    row = repeated_no_data.iloc[0]
-    insights.append(
-      f"The query '{row['query_id']}' under topic '{row['topic']}' is repeatedly returning no data. This suggests the wording may be too narrow, too niche, or poorly aligned with current YouTube content patterns."
-    )
-
-  topic_variability = (
-    diagnostic_df.groupby("topic", as_index=False)
-    .agg(
-      average_records=("records_written", "mean"),
-      max_records=("records_written", "max"),
-      min_records=("records_written", "min"),
-    )
-  )
-  if not topic_variability.empty:
-    topic_variability["range"] = topic_variability["max_records"] - topic_variability["min_records"]
-    row = topic_variability.sort_values("range", ascending=False).iloc[0]
-    insights.append(
-      f"Topic '{row['topic']}' shows the highest variability in output. That means its performance is unstable across queries, so it deserves closer tuning before being trusted for forecasting."
-    )
-
-  if not insights:
-    insights.append(
-      "The current diagnostic view suggests the pipeline is stable, but a longer historical window is still needed for deeper root-cause analysis."
-    )
-
-  return insights[:4]
-
-
 def main() -> None:
   st.title("SocialPulse V2")
   st.caption(
-    "A professional YouTube social listening dashboard for descriptive, diagnostic, predictive, and prescriptive analytics."
+    "Comment and genre based YouTube social listening dashboard powered by sentiment enrichment on comment data."
   )
 
   tables = get_data()
-  overview_df = tables["overview"]
-  collection_df = tables["collection"]
-  query_df = tables["query"]
-  comments_df = tables["comments"]
+  overview_df = tables.get("overview", pd.DataFrame())
+  collection_df = tables.get("collection", pd.DataFrame())
+  query_df = tables.get("query", pd.DataFrame())
+  sentiment_comments_df = tables.get("sentiment_comments", tables.get("comments", pd.DataFrame()))
 
-  sentiment_daily_summary_df = tables["sentiment_daily_summary"]
-  sentiment_video_summary_df = tables["sentiment_video_summary"]
-  sentiment_topic_summary_df = tables["sentiment_topic_summary"]
-  sentiment_daily_trend_df = tables["sentiment_daily_trend"]
-  sentiment_weekday_hour_df = tables["sentiment_weekday_hour_engagement"]
-  sentiment_keyword_df = tables["sentiment_keyword_frequency"]
-  sentiment_overview_kpis_df = tables["sentiment_overview_kpis"]
+  sentiment_daily_summary_df = tables.get("sentiment_daily_summary", pd.DataFrame())
+  sentiment_video_summary_df = tables.get("sentiment_video_summary", pd.DataFrame())
+  sentiment_topic_summary_df = tables.get("sentiment_topic_summary", pd.DataFrame())
+  sentiment_daily_trend_df = tables.get("sentiment_daily_trend", pd.DataFrame())
+  sentiment_weekday_hour_df = tables.get("sentiment_weekday_hour_engagement", pd.DataFrame())
+  sentiment_keyword_df = tables.get("sentiment_keyword_frequency", pd.DataFrame())
+  sentiment_overview_kpis_df = tables.get("sentiment_overview_kpis", pd.DataFrame())
 
-  if overview_df.empty and collection_df.empty and query_df.empty:
+  if (
+    overview_df.empty
+    and collection_df.empty
+    and query_df.empty
+    and sentiment_comments_df.empty
+    and sentiment_daily_summary_df.empty
+  ):
     st.warning(
-      "No dashboard data is available yet. Run the daily collection pipeline and rebuild the dashboard overview mart first."
+      "No dashboard data is available yet. Run the daily collection pipeline and rebuild the dashboard marts first."
     )
     return
 
   with st.sidebar:
     st.header("Dashboard Filters")
 
-    all_topics = sorted(collection_df["topic"].dropna().unique().tolist()) if not collection_df.empty else []
-    all_genres = sorted(collection_df["genre"].dropna().unique().tolist()) if not collection_df.empty else []
-    all_statuses = sorted(query_df["collection_status"].dropna().unique().tolist()) if not query_df.empty else []
+    topic_pool = pd.concat(
+      [
+        sentiment_topic_summary_df["topic"] if "topic" in sentiment_topic_summary_df.columns else pd.Series(dtype="object"),
+        sentiment_comments_df["topic"] if "topic" in sentiment_comments_df.columns else pd.Series(dtype="object"),
+      ],
+      ignore_index=True,
+    ).dropna().astype(str)
+
+    genre_pool = pd.concat(
+      [
+        sentiment_topic_summary_df["genre"] if "genre" in sentiment_topic_summary_df.columns else pd.Series(dtype="object"),
+        sentiment_comments_df["genre"] if "genre" in sentiment_comments_df.columns else pd.Series(dtype="object"),
+      ],
+      ignore_index=True,
+    ).dropna().astype(str)
+
+    all_topics = sorted(topic_pool.unique().tolist())
+    all_genres = sorted(genre_pool.unique().tolist())
+
+    analysis_query = st.text_input(
+      "Type analysis query",
+      value="",
+      placeholder="Example: travel, hotels, food, phones",
+      help="Type a keyword. The dashboard will match comment text directly and also map known keywords into the related topic and genre.",
+    )
 
     selected_topics = st.multiselect(
       "Select topic",
       options=all_topics,
-      default=all_topics,
-      help="Filter the dashboard by one or more topics.",
+      default=[],
+      help="Leave empty to include all topics.",
     )
 
     selected_genres = st.multiselect(
       "Select genre",
       options=all_genres,
-      default=all_genres,
-      help="Filter the dashboard by one or more genres.",
-    )
-
-    selected_statuses = st.multiselect(
-      "Select query status",
-      options=all_statuses,
-      default=all_statuses,
-      help="Filter query-level diagnostics by execution status.",
+      default=[],
+      help="Leave empty to include all genres.",
     )
 
     min_date = None
     max_date = None
 
-    collection_run_dates = pd.Series(dtype="datetime64[ns]")
-    if not collection_df.empty and "run_date" in collection_df.columns:
-      collection_run_dates = pd.to_datetime(collection_df["run_date"], errors="coerce").dropna()
-      if not collection_run_dates.empty:
-        min_date = collection_run_dates.min().date()
-        max_date = collection_run_dates.max().date()
+    date_pool = pd.Series(dtype="datetime64[ns]")
+    if not sentiment_daily_trend_df.empty and "collection_date" in sentiment_daily_trend_df.columns:
+      date_pool = pd.to_datetime(sentiment_daily_trend_df["collection_date"], errors="coerce").dropna()
+
+    if date_pool.empty and not collection_df.empty and "run_date" in collection_df.columns:
+      date_pool = pd.to_datetime(collection_df["run_date"], errors="coerce").dropna()
+
+    if not date_pool.empty:
+      min_date = date_pool.min().date()
+      max_date = date_pool.max().date()
 
     start_date = st.date_input(
       "Start date",
@@ -214,15 +168,25 @@ def main() -> None:
       max_value=max_date,
     ) if max_date else None
 
-  filtered_collection, filtered_query, filtered_comments = apply_dashboard_filters( # type: ignore
+  analysis_context = resolve_analysis_query(analysis_query)
+  matched_topic = analysis_context.get("matched_topic")
+  matched_genre = analysis_context.get("matched_genre")
+
+  if analysis_query.strip() and matched_topic and matched_genre:
+    st.info(
+      f"Typed keyword '{analysis_query.strip()}' is being mapped to topic '{pretty_text(matched_topic)}' under genre '{pretty_text(matched_genre)}'. The charts below combine direct keyword matches and the broader topic/genre context."
+    )
+
+  filtered_collection, filtered_query, filtered_sentiment_comments = apply_dashboard_filters(
     collection_df=collection_df,
     query_df=query_df,
     selected_topics=selected_topics,
     selected_genres=selected_genres,
-    selected_statuses=selected_statuses,
+    selected_statuses=[],
     start_date=start_date,
     end_date=end_date,
-    comments_df=comments_df,
+    comments_df=sentiment_comments_df,
+    analysis_query=analysis_query,
   )
 
   filtered_sentiment = apply_sentiment_gold_filters(
@@ -237,46 +201,51 @@ def main() -> None:
     selected_genres=selected_genres,
     start_date=start_date,
     end_date=end_date,
+    analysis_query=analysis_query,
+    filtered_sentiment_comments=filtered_sentiment_comments,
   )
 
-  filtered_sentiment_daily_summary = filtered_sentiment["sentiment_daily_summary"]
-  filtered_sentiment_video_summary = filtered_sentiment["sentiment_video_summary"]
   filtered_sentiment_topic_summary = filtered_sentiment["sentiment_topic_summary"]
   filtered_sentiment_daily_trend = filtered_sentiment["sentiment_daily_trend"]
+  filtered_sentiment_video_summary = filtered_sentiment["sentiment_video_summary"]
   filtered_sentiment_weekday_hour = filtered_sentiment["sentiment_weekday_hour_engagement"]
   filtered_sentiment_keyword = filtered_sentiment["sentiment_keyword_frequency"]
+  filtered_sentiment_overview_kpis = filtered_sentiment["sentiment_overview_kpis"]
 
-  latest_overview = pd.DataFrame()
-
-  if not overview_df.empty:
-    latest_overview = overview_df.copy()
-    latest_overview["run_date"] = pd.to_datetime(latest_overview["run_date"], errors="coerce")
-    latest_overview = latest_overview.dropna(subset=["run_date"]).sort_values("run_date")
-    if start_date is not None:
-      latest_overview = latest_overview[latest_overview["run_date"] >= pd.Timestamp(start_date)] # type: ignore
-    if end_date is not None:
-      latest_overview = latest_overview[latest_overview["run_date"] <= pd.Timestamp(end_date)] # type: ignore
-
-  total_records = filtered_collection["total_records_written"].sum() if not filtered_collection.empty else 0
-  total_queries = filtered_query["query_id"].nunique() if not filtered_query.empty else 0
-  total_videos = filtered_collection["total_videos_fetched"].sum() if not filtered_collection.empty else 0
-  total_errors = filtered_query["error_count"].sum() if not filtered_query.empty else 0
-
-  latest_topics = 0
-  latest_genres = 0
-
-  if not latest_overview.empty:
-    latest_row = latest_overview.sort_values("run_date").iloc[-1]
-    latest_topics = int(latest_row["topics_covered"])
-    latest_genres = int(latest_row["genres_covered"])
+  if not filtered_sentiment_comments.empty:
+    total_comments = int(filtered_sentiment_comments["comment_id"].nunique()) if "comment_id" in filtered_sentiment_comments.columns else len(filtered_sentiment_comments)
+    avg_sentiment = float(filtered_sentiment_comments["sentiment_score"].mean()) if "sentiment_score" in filtered_sentiment_comments.columns else 0.0
+    positive_ratio = float((filtered_sentiment_comments["sentiment_label"] == "positive").mean()) if "sentiment_label" in filtered_sentiment_comments.columns else 0.0
+    negative_ratio = float((filtered_sentiment_comments["sentiment_label"] == "negative").mean()) if "sentiment_label" in filtered_sentiment_comments.columns else 0.0
+    topics_covered = int(filtered_sentiment_comments["topic"].dropna().astype(str).nunique()) if "topic" in filtered_sentiment_comments.columns else 0
+    genres_covered = int(filtered_sentiment_comments["genre"].dropna().astype(str).nunique()) if "genre" in filtered_sentiment_comments.columns else 0
+    videos_covered = int(filtered_sentiment_comments["video_id"].dropna().astype(str).nunique()) if "video_id" in filtered_sentiment_comments.columns else 0
+  elif not filtered_sentiment_topic_summary.empty:
+    total_comments = int(filtered_sentiment_topic_summary["comments_count"].sum()) if "comments_count" in filtered_sentiment_topic_summary.columns else 0
+    avg_sentiment = float(filtered_sentiment_topic_summary["avg_sentiment_score"].mean()) if "avg_sentiment_score" in filtered_sentiment_topic_summary.columns else 0.0
+    positive_ratio = float(filtered_sentiment_topic_summary["positive_ratio"].mean()) if "positive_ratio" in filtered_sentiment_topic_summary.columns else 0.0
+    negative_ratio = float(filtered_sentiment_topic_summary["negative_ratio"].mean()) if "negative_ratio" in filtered_sentiment_topic_summary.columns else 0.0
+    topics_covered = int(filtered_sentiment_topic_summary["topic"].nunique()) if "topic" in filtered_sentiment_topic_summary.columns else 0
+    genres_covered = int(filtered_sentiment_topic_summary["genre"].nunique()) if "genre" in filtered_sentiment_topic_summary.columns else 0
+    videos_covered = int(filtered_sentiment_topic_summary["videos_covered"].sum()) if "videos_covered" in filtered_sentiment_topic_summary.columns else 0
+  else:
+    total_comments = 0
+    avg_sentiment = 0.0
+    positive_ratio = 0.0
+    negative_ratio = 0.0
+    topics_covered = 0
+    genres_covered = 0
+    videos_covered = 0
 
   c1, c2, c3, c4, c5, c6 = st.columns(6)
-  c1.metric("Written Records", format_number(total_records))
-  c2.metric("Unique Queries", format_number(total_queries))
-  c3.metric("Fetched Videos", format_number(total_videos))
-  c4.metric("Topics Covered", format_number(latest_topics))
-  c5.metric("Genres Covered", format_number(latest_genres))
-  c6.metric("Errors", format_number(total_errors))
+  c1.metric("Comments Matched", format_number(total_comments))
+  c2.metric("Average Sentiment", format_score(avg_sentiment))
+  c3.metric("Positive Share", format_pct(positive_ratio))
+  c4.metric("Negative Share", format_pct(negative_ratio))
+  c5.metric("Topics Matched", format_number(topics_covered))
+  c6.metric("Unique Videos Matched", format_number(videos_covered))
+
+  st.caption(f"Genres matched in current view: {genres_covered}")
 
   tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["Overview", "Descriptive", "Diagnostic", "Predictive", "Prescriptive"]
@@ -285,18 +254,21 @@ def main() -> None:
   with tab1:
     render_overview_tab(
       filtered_collection=filtered_collection,
+      filtered_sentiment_overview_kpis=filtered_sentiment_overview_kpis,
+      filtered_sentiment_daily_trend=filtered_sentiment_daily_trend,
+      filtered_sentiment_topic_summary=filtered_sentiment_topic_summary,
+      filtered_sentiment_comments=filtered_sentiment_comments,
       show_empty_state=show_empty_state,
     )
 
   with tab2:
     render_descriptive_tab(
-      filtered_collection=filtered_collection,
-      filtered_comments=filtered_comments,
       filtered_sentiment_topic_summary=filtered_sentiment_topic_summary,
       filtered_sentiment_daily_trend=filtered_sentiment_daily_trend,
       filtered_sentiment_video_summary=filtered_sentiment_video_summary,
       filtered_sentiment_weekday_hour=filtered_sentiment_weekday_hour,
       filtered_sentiment_keyword=filtered_sentiment_keyword,
+      filtered_sentiment_comments=filtered_sentiment_comments,
       weekday_order=WEEKDAY_ORDER,
       format_number=format_number,
       format_hour_12=format_hour_12,
@@ -307,22 +279,39 @@ def main() -> None:
 
   with tab3:
     render_diagnostic_tab(
-      filtered_query=filtered_query,
-      build_diagnostic_insights=build_diagnostic_insights,
+      filtered_sentiment_topic_summary=filtered_sentiment_topic_summary,
+      filtered_sentiment_video_summary=filtered_sentiment_video_summary,
+      filtered_sentiment_keyword=filtered_sentiment_keyword,
+      filtered_sentiment_daily_trend=filtered_sentiment_daily_trend,
+      filtered_sentiment_comments=filtered_sentiment_comments,
+      format_score=format_score,
+      format_pct=format_pct,
       show_empty_state=show_empty_state,
     )
 
   with tab4:
     render_predictive_tab(
-      filtered_collection=filtered_collection,
+      filtered_sentiment_daily_trend=filtered_sentiment_daily_trend,
+      format_number=format_number,
+      format_score=format_score,
       show_empty_state=show_empty_state,
     )
 
   with tab5:
     render_prescriptive_tab(
-      filtered_query=filtered_query,
-      build_prescriptive_recommendations=build_prescriptive_recommendations,
+      filtered_sentiment_topic_summary=filtered_sentiment_topic_summary,
+      filtered_sentiment_keyword=filtered_sentiment_keyword,
+      filtered_sentiment_comments=filtered_sentiment_comments,
+      format_score=format_score,
+      format_pct=format_pct,
+      show_empty_state=show_empty_state,
     )
+
+  with st.expander("Pipeline Health (secondary)"):
+    st.write("This is only a supporting operational view and not the main story.")
+    st.write(f"Collection rows in current filter: {len(filtered_collection)}")
+    st.write(f"Query rows in current filter: {len(filtered_query)}")
+    st.write(f"Comment rows in current filter: {len(filtered_sentiment_comments)}")
 
 
 if __name__ == "__main__":

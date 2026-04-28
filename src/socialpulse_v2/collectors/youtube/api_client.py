@@ -46,72 +46,108 @@ class YouTubeAPIClient:
   def search_videos(
     self,
     query_text: str,
-    max_results: int = 5,
-    lookback_days: int = 7,
+    max_results: int = 25,
+    lookback_days: int = 30,
   ) -> list[dict[str, Any]]:
-    payload = self._get(
-      "/search",
-      {
+    videos: list[dict[str, Any]] = []
+    seen_video_ids: set[str] = set()
+    next_page_token: str | None = None
+    remaining = max_results
+
+    while remaining > 0:
+      page_size = min(50, remaining)
+
+      params: dict[str, Any] = {
         "part": "snippet",
         "q": query_text,
         "type": "video",
         "order": "date",
-        "maxResults": max_results,
+        "maxResults": page_size,
         "publishedAfter": self.build_published_after(lookback_days),
-      },
-    )
+      }
 
-    videos: list[dict[str, Any]] = []
-    for item in payload.get("items", []):
-      snippet = item.get("snippet", {})
-      video_id = item.get("id", {}).get("videoId")
-      if not video_id:
-        continue
+      if next_page_token:
+        params["pageToken"] = next_page_token
 
-      videos.append(
-        {
-          "video_id": video_id,
-          "video_title": snippet.get("title", ""),
-          "video_description": snippet.get("description", ""),
-          "channel_id": snippet.get("channelId", ""),
-          "channel_title": snippet.get("channelTitle", ""),
-          "video_published_at": snippet.get("publishedAt", ""),
-        }
-      )
+      payload = self._get("/search", params)
 
-    return videos
+      for item in payload.get("items", []):
+        snippet = item.get("snippet", {})
+        video_id = item.get("id", {}).get("videoId")
+        if not video_id or video_id in seen_video_ids:
+          continue
+
+        seen_video_ids.add(video_id)
+        videos.append(
+          {
+            "video_id": video_id,
+            "video_title": snippet.get("title", ""),
+            "video_description": snippet.get("description", ""),
+            "channel_id": snippet.get("channelId", ""),
+            "channel_title": snippet.get("channelTitle", ""),
+            "video_published_at": snippet.get("publishedAt", ""),
+          }
+        )
+
+      remaining = max_results - len(videos)
+      next_page_token = payload.get("nextPageToken")
+
+      if not next_page_token:
+        break
+
+    return videos[:max_results]
 
   def fetch_comments(
     self,
     video_id: str,
-    max_results: int = 20,
+    max_results: int = 100,
   ) -> list[dict[str, Any]]:
-    payload = self._get(
-      "/commentThreads",
-      {
+    comments: list[dict[str, Any]] = []
+    seen_comment_ids: set[str] = set()
+    next_page_token: str | None = None
+    remaining = max_results
+
+    while remaining > 0:
+      page_size = min(100, remaining)
+
+      params: dict[str, Any] = {
         "part": "snippet",
         "videoId": video_id,
-        "order": "relevance",
+        "order": "time",
         "textFormat": "plainText",
-        "maxResults": min(max_results, 100),
-      },
-    )
+        "maxResults": page_size,
+      }
 
-    comments: list[dict[str, Any]] = []
-    for item in payload.get("items", []):
-      top_level = item.get("snippet", {}).get("topLevelComment", {})
-      snippet = top_level.get("snippet", {})
+      if next_page_token:
+        params["pageToken"] = next_page_token
 
-      comments.append(
-        {
-          "comment_id": top_level.get("id", ""),
-          "author_name": snippet.get("authorDisplayName", ""),
-          "comment_text": snippet.get("textDisplay", ""),
-          "like_count": snippet.get("likeCount", 0),
-          "comment_published_at": snippet.get("publishedAt", ""),
-          "comment_updated_at": snippet.get("updatedAt", ""),
-          "video_id": video_id,
-        }
-      )
+      payload = self._get("/commentThreads", params)
 
-    return comments
+      for item in payload.get("items", []):
+        top_level = item.get("snippet", {}).get("topLevelComment", {})
+        snippet = top_level.get("snippet", {})
+        comment_id = top_level.get("id", "")
+
+        if not comment_id or comment_id in seen_comment_ids:
+          continue
+
+        seen_comment_ids.add(comment_id)
+        comments.append(
+          {
+            "comment_id": comment_id,
+            "author_name": snippet.get("authorDisplayName", ""),
+            "comment_text": snippet.get("textDisplay", ""),
+            "like_count": snippet.get("likeCount", 0),
+            "comment_published_at": snippet.get("publishedAt", ""),
+            "comment_updated_at": snippet.get("updatedAt", ""),
+            "video_id": video_id,
+          }
+        )
+
+      remaining = max_results - len(comments)
+      next_page_token = payload.get("nextPageToken")
+
+      if not next_page_token:
+        break
+
+    return comments[:max_results]

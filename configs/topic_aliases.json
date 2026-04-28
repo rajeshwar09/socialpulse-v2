@@ -1,0 +1,191 @@
+{
+  "technology": {
+    "smartphones": [
+      "smartphone",
+      "smartphones",
+      "phone",
+      "phones",
+      "mobile",
+      "mobiles",
+      "iphone",
+      "android"
+    ],
+    "tablets": [
+      "tablet",
+      "tablets",
+      "tab",
+      "tabs",
+      "ipad",
+      "ipads"
+    ],
+    "laptops": [
+      "laptop",
+      "laptops",
+      "notebook",
+      "notebooks",
+      "macbook",
+      "gaming laptop"
+    ],
+    "smartwatches": [
+      "smartwatch",
+      "smartwatches",
+      "watch",
+      "watches",
+      "wearable",
+      "wearables"
+    ],
+    "headphones": [
+      "headphone",
+      "headphones",
+      "earbud",
+      "earbuds",
+      "earphone",
+      "earphones",
+      "airpods",
+      "headset"
+    ],
+    "ai_tools": [
+      "ai",
+      "ai tool",
+      "ai tools",
+      "chatgpt",
+      "gemini",
+      "copilot",
+      "claude",
+      "llm",
+      "llms"
+    ]
+  },
+  "entertainment": {
+    "movies": [
+      "movie",
+      "movies",
+      "film",
+      "films",
+      "cinema"
+    ],
+    "ott_platforms": [
+      "ott",
+      "ott platform",
+      "ott platforms",
+      "netflix",
+      "prime video",
+      "hotstar",
+      "jiohotstar"
+    ],
+    "web_series": [
+      "web series",
+      "series",
+      "shows",
+      "tv series"
+    ],
+    "music": [
+      "music",
+      "album",
+      "albums",
+      "song",
+      "songs"
+    ]
+  },
+  "sports": {
+    "cricket": [
+      "cricket",
+      "ipl",
+      "test match",
+      "odi",
+      "t20"
+    ],
+    "football": [
+      "football",
+      "soccer",
+      "premier league",
+      "champions league"
+    ]
+  },
+  "education": {
+    "online_courses": [
+      "course",
+      "courses",
+      "online course",
+      "online courses"
+    ],
+    "study_apps": [
+      "study app",
+      "study apps",
+      "learning app",
+      "learning apps"
+    ]
+  },
+  "automotive": {
+    "electric_vehicles": [
+      "electric vehicle",
+      "electric vehicles",
+      "ev",
+      "evs"
+    ],
+    "cars": [
+      "car",
+      "cars",
+      "automobile",
+      "automobiles"
+    ],
+    "bikes": [
+      "bike",
+      "bikes",
+      "motorbike",
+      "motorbikes"
+    ]
+  },
+  "lifestyle": {
+    "skincare": [
+      "skincare",
+      "skin care",
+      "serum",
+      "moisturizer"
+    ],
+    "fitness": [
+      "fitness",
+      "gym",
+      "workout",
+      "protein"
+    ],
+    "food": [
+      "food",
+      "restaurant",
+      "restaurants",
+      "meal",
+      "meals",
+      "dessert"
+    ]
+  },
+  "travel": {
+    "travel": [
+      "travel",
+      "trip",
+      "trips",
+      "tour",
+      "tours",
+      "vlog",
+      "vlogs"
+    ],
+    "hotels": [
+      "hotel",
+      "hotels",
+      "resort",
+      "resorts",
+      "stay",
+      "stays"
+    ]
+  },
+  "finance": {
+    "personal_finance": [
+      "finance",
+      "personal finance",
+      "saving",
+      "investment",
+      "investments",
+      "loan",
+      "loans"
+    ]
+  }
+}

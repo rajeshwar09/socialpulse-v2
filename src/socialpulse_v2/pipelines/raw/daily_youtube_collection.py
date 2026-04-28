@@ -194,14 +194,15 @@ def run_daily_youtube_collection(
   plan_path: Path,
   output_root: Path,
   api_key: str,
-  search_results_per_query: int = 5,
-  comments_per_video: int = 20,
-  max_queries_per_run: int = 3,
-  lookback_days: int = 7,
+  search_results_per_query: int = 25,
+  comments_per_video: int = 100,
+  max_queries_per_run: int | None = None,
+  lookback_days: int = 30,
   lakehouse_manager: LakehouseManager | None = None,
 ) -> dict[str, Any]:
   plan_version, selected_queries = load_selected_queries(plan_path)
-  selected_queries = selected_queries[:max_queries_per_run]
+  if max_queries_per_run is not None:
+    selected_queries = selected_queries[:max_queries_per_run]
 
   run_timestamp = datetime.now(UTC)
   run_id = f"daily-{run_timestamp.strftime('%Y%m%dT%H%M%SZ')}"

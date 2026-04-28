@@ -9,19 +9,101 @@ from deltalake import DeltaTable
 from socialpulse_v2.core.paths import LAKEHOUSE_ROOT
 
 
+ALIAS_PATH = Path("configs/topic_aliases.json")
+
+WEEKDAY_ORDER = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+]
+
+
 def _read_delta_table(path: Path) -> pd.DataFrame:
   if not path.exists():
     return pd.DataFrame()
   return DeltaTable(str(path)).to_pandas()
 
 
-def _read_comment_level_data(gold_root: Path) -> pd.DataFrame:
-  bronze_candidates = [
-    LAKEHOUSE_ROOT / "bronze" / "youtube_comments_raw",
+def load_topic_aliases() -> dict[str, dict[str, list[str]]]:
+  if not ALIAS_PATH.exists():
+    return {}
+  return json.loads(ALIAS_PATH.read_text(encoding="utf-8"))
+
+
+def resolve_analysis_query(query: str) -> dict[str, str | list[str] | None]:
+  cleaned = query.strip().lower()
+  if not cleaned:
+    return {
+      "raw_query": "",
+      "matched_topic": None,
+      "matched_genre": None,
+      "matched_aliases": [],
+    }
+
+  alias_map = load_topic_aliases()
+  matched_topic = None
+  matched_genre = None
+  matched_aliases: list[str] = []
+
+  for genre, topic_map in alias_map.items():
+    for topic, aliases in topic_map.items():
+      for alias in aliases:
+        alias_clean = alias.strip().lower()
+        if alias_clean and (
+          cleaned == alias_clean
+          or cleaned in alias_clean
+          or alias_clean in cleaned
+        ):
+          matched_topic = topic
+          matched_genre = genre
+          matched_aliases.append(alias)
+          break
+      if matched_topic:
+        break
+    if matched_genre:
+      break
+
+  return {
+    "raw_query": cleaned,
+    "matched_topic": matched_topic,
+    "matched_genre": matched_genre,
+    "matched_aliases": matched_aliases,
+  }
+
+
+def _text_mask(df: pd.DataFrame, columns: list[str], query: str) -> pd.Series:
+  if df.empty:
+    return pd.Series(dtype="bool")
+
+  cleaned_query = query.strip().lower()
+  if not cleaned_query:
+    return pd.Series([True] * len(df), index=df.index)
+
+  mask = pd.Series([False] * len(df), index=df.index)
+  for column in columns:
+    if column in df.columns:
+      mask = mask | (
+        df[column]
+        .fillna("")
+        .astype(str)
+        .str.lower()
+        .str.contains(cleaned_query, regex=False)
+      )
+  return mask
+
+
+def _read_comment_level_data() -> pd.DataFrame:
+  preferred_candidates = [
+    LAKEHOUSE_ROOT / "silver" / "youtube_comments_sentiment",
     LAKEHOUSE_ROOT / "bronze" / "youtube_comments_daily_raw",
+    LAKEHOUSE_ROOT / "bronze" / "youtube_comments_raw",
   ]
 
-  for candidate in bronze_candidates:
+  for candidate in preferred_candidates:
     if candidate.exists():
       try:
         comments_df = DeltaTable(str(candidate)).to_pandas()
@@ -60,48 +142,101 @@ def _normalize_comment_columns(comments_df: pd.DataFrame) -> pd.DataFrame:
     "published_at": "comment_published_at",
     "fetched_at": "collected_at",
     "source_run_id": "run_id",
+    "like_count": "comment_like_count",
+    "author_name": "author_display_name",
   }
+
   for old_name, new_name in rename_map.items():
     if old_name in df.columns and new_name not in df.columns:
       df[new_name] = df[old_name]
 
+  defaults = {
+    "run_id": pd.NA,
+    "query_id": pd.NA,
+    "query_text": pd.NA,
+    "topic": pd.NA,
+    "genre": pd.NA,
+    "video_id": pd.NA,
+    "video_title": pd.NA,
+    "channel_title": pd.NA,
+    "comment_id": pd.NA,
+    "comment_text": pd.NA,
+    "comment_like_count": 0,
+    "reply_count": 0,
+    "sentiment_label": pd.NA,
+    "sentiment_score": 0.0,
+    "platform": "youtube",
+  }
+
+  for column, default_value in defaults.items():
+    if column not in df.columns:
+      df[column] = default_value
+
   if "comment_published_at" in df.columns:
-    df["comment_published_at"] = pd.to_datetime(df["comment_published_at"], errors="coerce", utc=True)
+    df["comment_published_at"] = pd.to_datetime(
+      df["comment_published_at"],
+      errors="coerce",
+      utc=True,
+    )
   else:
     df["comment_published_at"] = pd.NaT
 
-  if "run_id" not in df.columns:
-    df["run_id"] = pd.NA
-  if "query_id" not in df.columns:
-    df["query_id"] = pd.NA
-  if "topic" not in df.columns:
-    df["topic"] = pd.NA
-  if "genre" not in df.columns:
-    df["genre"] = pd.NA
-  if "comment_text" not in df.columns:
-    df["comment_text"] = pd.NA
-  if "like_count" not in df.columns:
-    df["like_count"] = 0
+  if "collection_date" not in df.columns:
+    if "comment_published_at" in df.columns:
+      df["collection_date"] = (
+        pd.to_datetime(df["comment_published_at"], errors="coerce")
+        .dt.date
+        .astype("string")
+      )
+    else:
+      df["collection_date"] = pd.NA
 
-  df["like_count"] = pd.to_numeric(df["like_count"], errors="coerce").fillna(0)
+  df["comment_like_count"] = pd.to_numeric(
+    df["comment_like_count"],
+    errors="coerce",
+  ).fillna(0).astype("int64")
 
-  df["comment_date"] = df["comment_published_at"].dt.date
-  df["comment_hour_24"] = df["comment_published_at"].dt.hour
+  df["reply_count"] = pd.to_numeric(
+    df["reply_count"],
+    errors="coerce",
+  ).fillna(0).astype("int64")
+
+  df["sentiment_score"] = pd.to_numeric(
+    df["sentiment_score"],
+    errors="coerce",
+  ).fillna(0.0).astype("float64")
+
+  df["comment_hour_24"] = pd.to_numeric(
+    df["comment_published_at"].dt.hour,
+    errors="coerce",
+  ).astype("Int64")
+
   df["weekday_name"] = pd.Categorical(
     df["comment_published_at"].dt.day_name(),
-    categories=[
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-      "Sunday",
-    ],
+    categories=WEEKDAY_ORDER,
     ordered=True,
   )
 
   return df
+
+
+def _align_timestamp_to_series_tz(series: pd.Series, value) -> pd.Timestamp:
+  ts = pd.Timestamp(value)
+
+  tz = None
+  if pd.api.types.is_datetime64tz_dtype(series):
+    tz = series.dt.tz
+
+  if tz is not None:
+    if ts.tzinfo is None:
+      ts = ts.tz_localize(tz)
+    else:
+      ts = ts.tz_convert(tz)
+  else:
+    if ts.tzinfo is not None:
+      ts = ts.tz_localize(None)
+
+  return ts
 
 
 def load_dashboard_tables() -> dict[str, pd.DataFrame]:
@@ -110,7 +245,7 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
   overview_df = _read_delta_table(gold_root / "dashboard_overview_daily")
   collection_df = _read_delta_table(gold_root / "collection_daily_summary")
   query_df = _read_delta_table(gold_root / "query_performance_summary")
-  comments_df = _normalize_comment_columns(_read_comment_level_data(gold_root))
+  sentiment_comments_df = _normalize_comment_columns(_read_comment_level_data())
 
   sentiment_daily_summary_df = _read_delta_table(gold_root / "youtube_sentiment_daily_summary")
   sentiment_video_summary_df = _read_delta_table(gold_root / "youtube_sentiment_video_summary")
@@ -120,79 +255,29 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
   sentiment_keyword_df = _read_delta_table(gold_root / "youtube_sentiment_keyword_frequency")
   sentiment_overview_kpis_df = _read_delta_table(gold_root / "youtube_sentiment_overview_kpis")
 
-  sentiment_frames_with_date = [
+  for frame in [overview_df, collection_df, query_df]:
+    if not frame.empty and "run_date" in frame.columns:
+      frame["run_date"] = pd.to_datetime(frame["run_date"], errors="coerce")
+      frame["run_date_label"] = frame["run_date"].dt.strftime("%Y-%m-%d")
+
+  for frame in [
     sentiment_daily_summary_df,
     sentiment_video_summary_df,
     sentiment_daily_trend_df,
     sentiment_weekday_hour_df,
     sentiment_keyword_df,
     sentiment_overview_kpis_df,
-  ]
-
-  for frame in sentiment_frames_with_date:
+  ]:
     if not frame.empty and "collection_date" in frame.columns:
       frame["collection_date"] = pd.to_datetime(frame["collection_date"], errors="coerce")
       frame["collection_date_label"] = frame["collection_date"].dt.strftime("%Y-%m-%d")
-
-  standard_frames_with_run_date = [
-    overview_df,
-    collection_df,
-    query_df,
-  ]
-
-  for frame in standard_frames_with_run_date:
-    if not frame.empty and "run_date" in frame.columns:
-      frame["run_date"] = pd.to_datetime(frame["run_date"], errors="coerce")
-      frame["run_date_label"] = frame["run_date"].dt.strftime("%Y-%m-%d")
-
-  numeric_columns = {
-    "overview": [
-      "topics_covered",
-      "genres_covered",
-      "queries_executed",
-      "successful_queries",
-      "partial_success_queries",
-      "failed_queries",
-      "no_data_queries",
-      "unique_queries_seen",
-      "total_videos_fetched",
-      "total_records_fetched",
-      "total_records_written",
-      "total_error_count",
-    ],
-    "collection": [
-      "queries_executed",
-      "total_videos_fetched",
-      "total_records_fetched",
-      "total_records_written",
-      "total_error_count",
-    ],
-    "query": [
-      "expected_units",
-      "videos_fetched",
-      "records_fetched",
-      "records_written",
-      "error_count",
-    ],
-  }
-
-  for column in numeric_columns["overview"]:
-    if column in overview_df.columns:
-      overview_df[column] = pd.to_numeric(overview_df[column], errors="coerce").fillna(0)
-
-  for column in numeric_columns["collection"]:
-    if column in collection_df.columns:
-      collection_df[column] = pd.to_numeric(collection_df[column], errors="coerce").fillna(0)
-
-  for column in numeric_columns["query"]:
-    if column in query_df.columns:
-      query_df[column] = pd.to_numeric(query_df[column], errors="coerce").fillna(0)
 
   return {
     "overview": overview_df,
     "collection": collection_df,
     "query": query_df,
-    "comments": comments_df,
+    "comments": sentiment_comments_df,
+    "sentiment_comments": sentiment_comments_df,
     "sentiment_daily_summary": sentiment_daily_summary_df,
     "sentiment_video_summary": sentiment_video_summary_df,
     "sentiment_topic_summary": sentiment_topic_summary_df,
@@ -212,32 +297,45 @@ def apply_dashboard_filters(
   start_date,
   end_date,
   comments_df: pd.DataFrame | None = None,
+  analysis_query: str | None = None,
 ):
   filtered_collection = collection_df.copy()
   filtered_query = query_df.copy()
   filtered_comments = comments_df.copy() if comments_df is not None else pd.DataFrame()
 
   if not filtered_collection.empty:
-    if selected_topics:
+    if selected_topics and "topic" in filtered_collection.columns:
       filtered_collection = filtered_collection[filtered_collection["topic"].isin(selected_topics)]
-    if selected_genres:
+    if selected_genres and "genre" in filtered_collection.columns:
       filtered_collection = filtered_collection[filtered_collection["genre"].isin(selected_genres)]
-    if start_date is not None:
-      filtered_collection = filtered_collection[filtered_collection["run_date"] >= pd.Timestamp(start_date)]
-    if end_date is not None:
-      filtered_collection = filtered_collection[filtered_collection["run_date"] <= pd.Timestamp(end_date)]
+    if start_date is not None and "run_date" in filtered_collection.columns:
+      filtered_collection = filtered_collection[
+        filtered_collection["run_date"] >= pd.Timestamp(start_date)
+      ]
+    if end_date is not None and "run_date" in filtered_collection.columns:
+      filtered_collection = filtered_collection[
+        filtered_collection["run_date"] <= pd.Timestamp(end_date)
+      ]
 
   if not filtered_query.empty:
-    if selected_topics:
+    if selected_topics and "topic" in filtered_query.columns:
       filtered_query = filtered_query[filtered_query["topic"].isin(selected_topics)]
-    if selected_genres:
+    if selected_genres and "genre" in filtered_query.columns:
       filtered_query = filtered_query[filtered_query["genre"].isin(selected_genres)]
-    if selected_statuses:
+    if selected_statuses and "collection_status" in filtered_query.columns:
       filtered_query = filtered_query[filtered_query["collection_status"].isin(selected_statuses)]
-    if start_date is not None:
-      filtered_query = filtered_query[filtered_query["run_date"] >= pd.Timestamp(start_date)]
-    if end_date is not None:
-      filtered_query = filtered_query[filtered_query["run_date"] <= pd.Timestamp(end_date)]
+    if start_date is not None and "run_date" in filtered_query.columns:
+      filtered_query = filtered_query[
+        filtered_query["run_date"] >= pd.Timestamp(start_date)
+      ]
+    if end_date is not None and "run_date" in filtered_query.columns:
+      filtered_query = filtered_query[
+        filtered_query["run_date"] <= pd.Timestamp(end_date)
+      ]
+
+  analysis_context = resolve_analysis_query(analysis_query or "")
+  matched_topic = analysis_context["matched_topic"]
+  matched_genre = analysis_context["matched_genre"]
 
   if comments_df is not None and not filtered_comments.empty:
     if selected_topics and "topic" in filtered_comments.columns:
@@ -245,18 +343,52 @@ def apply_dashboard_filters(
     if selected_genres and "genre" in filtered_comments.columns:
       filtered_comments = filtered_comments[filtered_comments["genre"].isin(selected_genres)]
     if start_date is not None and "comment_published_at" in filtered_comments.columns:
+      start_ts = pd.Timestamp(start_date).tz_localize("UTC")
       filtered_comments = filtered_comments[
-        filtered_comments["comment_published_at"] >= pd.Timestamp(start_date).tz_localize("UTC")
+        filtered_comments["comment_published_at"] >= start_ts
       ]
     if end_date is not None and "comment_published_at" in filtered_comments.columns:
+      end_ts = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).tz_localize("UTC")
       filtered_comments = filtered_comments[
-        filtered_comments["comment_published_at"] < (pd.Timestamp(end_date) + pd.Timedelta(days=1)).tz_localize("UTC")
+        filtered_comments["comment_published_at"] < end_ts
       ]
+
+    if analysis_query and analysis_query.strip():
+      direct_mask = _text_mask(
+        filtered_comments,
+        ["query_text", "topic", "genre", "video_title", "channel_title", "comment_text"],
+        analysis_query,
+      )
+
+      alias_mask = pd.Series([False] * len(filtered_comments), index=filtered_comments.index)
+      if matched_topic and "topic" in filtered_comments.columns:
+        alias_mask = alias_mask | (
+          filtered_comments["topic"].astype(str) == str(matched_topic)
+        )
+      if matched_genre and "genre" in filtered_comments.columns:
+        alias_mask = alias_mask | (
+          filtered_comments["genre"].astype(str) == str(matched_genre)
+        )
+
+      filtered_comments = filtered_comments[direct_mask | alias_mask]
+
+      if matched_topic and "topic" in filtered_collection.columns and "genre" in filtered_collection.columns:
+        filtered_collection = filtered_collection[
+          filtered_collection["topic"].astype(str).isin([str(matched_topic)])
+          | filtered_collection["genre"].astype(str).isin([str(matched_genre)])
+        ]
+
+      if matched_topic and "topic" in filtered_query.columns and "genre" in filtered_query.columns:
+        filtered_query = filtered_query[
+          filtered_query["topic"].astype(str).isin([str(matched_topic)])
+          | filtered_query["genre"].astype(str).isin([str(matched_genre)])
+        ]
 
   if comments_df is None:
     return filtered_collection, filtered_query
 
   return filtered_collection, filtered_query, filtered_comments
+
 
 def _filter_sentiment_frame(
   df: pd.DataFrame,
@@ -265,6 +397,8 @@ def _filter_sentiment_frame(
   start_date,
   end_date,
   date_column: str = "collection_date",
+  analysis_query: str | None = None,
+  filtered_sentiment_comments: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
   if df.empty:
     return df.copy()
@@ -281,10 +415,47 @@ def _filter_sentiment_frame(
     filtered[date_column] = pd.to_datetime(filtered[date_column], errors="coerce")
 
     if start_date is not None:
-      filtered = filtered[filtered[date_column] >= pd.Timestamp(start_date)]
+      start_ts = _align_timestamp_to_series_tz(filtered[date_column], start_date)
+      filtered = filtered[filtered[date_column] >= start_ts]
 
     if end_date is not None:
-      filtered = filtered[filtered[date_column] <= pd.Timestamp(end_date)]
+      end_ts = _align_timestamp_to_series_tz(filtered[date_column], end_date)
+      filtered = filtered[filtered[date_column] <= end_ts]
+
+  if analysis_query and analysis_query.strip():
+    direct_mask = _text_mask(
+      filtered,
+      ["topic", "genre", "video_title", "channel_title", "keyword"],
+      analysis_query,
+    )
+
+    matched_mask = pd.Series([False] * len(filtered), index=filtered.index)
+
+    if filtered_sentiment_comments is not None and not filtered_sentiment_comments.empty:
+      matched_topics = (
+        set(filtered_sentiment_comments["topic"].dropna().astype(str).tolist())
+        if "topic" in filtered_sentiment_comments.columns
+        else set()
+      )
+      matched_genres = (
+        set(filtered_sentiment_comments["genre"].dropna().astype(str).tolist())
+        if "genre" in filtered_sentiment_comments.columns
+        else set()
+      )
+      matched_video_ids = (
+        set(filtered_sentiment_comments["video_id"].dropna().astype(str).tolist())
+        if "video_id" in filtered_sentiment_comments.columns
+        else set()
+      )
+
+      if matched_topics and "topic" in filtered.columns:
+        matched_mask = matched_mask | filtered["topic"].astype(str).isin(matched_topics)
+      if matched_genres and "genre" in filtered.columns:
+        matched_mask = matched_mask | filtered["genre"].astype(str).isin(matched_genres)
+      if matched_video_ids and "video_id" in filtered.columns:
+        matched_mask = matched_mask | filtered["video_id"].astype(str).isin(matched_video_ids)
+
+    filtered = filtered[direct_mask | matched_mask]
 
   return filtered
 
@@ -301,35 +472,76 @@ def apply_sentiment_gold_filters(
   selected_genres: list[str],
   start_date,
   end_date,
+  analysis_query: str | None = None,
+  filtered_sentiment_comments: pd.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
-  filtered_topic_summary = sentiment_topic_summary_df.copy()
-  if not filtered_topic_summary.empty:
-    if selected_topics and "topic" in filtered_topic_summary.columns:
-      filtered_topic_summary = filtered_topic_summary[filtered_topic_summary["topic"].isin(selected_topics)]
-    if selected_genres and "genre" in filtered_topic_summary.columns:
-      filtered_topic_summary = filtered_topic_summary[filtered_topic_summary["genre"].isin(selected_genres)]
-
   return {
     "sentiment_daily_summary": _filter_sentiment_frame(
-      sentiment_daily_summary_df, selected_topics, selected_genres, start_date, end_date
+      sentiment_daily_summary_df,
+      selected_topics,
+      selected_genres,
+      start_date,
+      end_date,
+      analysis_query=analysis_query,
+      filtered_sentiment_comments=filtered_sentiment_comments,
     ),
     "sentiment_video_summary": _filter_sentiment_frame(
-      sentiment_video_summary_df, selected_topics, selected_genres, start_date, end_date
+      sentiment_video_summary_df,
+      selected_topics,
+      selected_genres,
+      start_date,
+      end_date,
+      analysis_query=analysis_query,
+      filtered_sentiment_comments=filtered_sentiment_comments,
     ),
-    "sentiment_topic_summary": filtered_topic_summary,
+    "sentiment_topic_summary": _filter_sentiment_frame(
+      sentiment_topic_summary_df,
+      selected_topics,
+      selected_genres,
+      start_date,
+      end_date,
+      date_column="built_at",
+      analysis_query=analysis_query,
+      filtered_sentiment_comments=filtered_sentiment_comments,
+    ),
     "sentiment_daily_trend": _filter_sentiment_frame(
-      sentiment_daily_trend_df, selected_topics, selected_genres, start_date, end_date
+      sentiment_daily_trend_df,
+      selected_topics,
+      selected_genres,
+      start_date,
+      end_date,
+      analysis_query=analysis_query,
+      filtered_sentiment_comments=filtered_sentiment_comments,
     ),
     "sentiment_weekday_hour_engagement": _filter_sentiment_frame(
-      sentiment_weekday_hour_df, selected_topics, selected_genres, start_date, end_date
+      sentiment_weekday_hour_df,
+      selected_topics,
+      selected_genres,
+      start_date,
+      end_date,
+      analysis_query=analysis_query,
+      filtered_sentiment_comments=filtered_sentiment_comments,
     ),
     "sentiment_keyword_frequency": _filter_sentiment_frame(
-      sentiment_keyword_df, selected_topics, selected_genres, start_date, end_date
+      sentiment_keyword_df,
+      selected_topics,
+      selected_genres,
+      start_date,
+      end_date,
+      analysis_query=analysis_query,
+      filtered_sentiment_comments=filtered_sentiment_comments,
     ),
     "sentiment_overview_kpis": _filter_sentiment_frame(
-      sentiment_overview_kpis_df, selected_topics, selected_genres, start_date, end_date
+      sentiment_overview_kpis_df,
+      selected_topics,
+      selected_genres,
+      start_date,
+      end_date,
+      analysis_query=analysis_query,
+      filtered_sentiment_comments=filtered_sentiment_comments,
     ),
   }
+
 
 def build_prescriptive_recommendations(query_df: pd.DataFrame) -> list[str]:
   recommendations: list[str] = []
@@ -350,79 +562,36 @@ def build_prescriptive_recommendations(query_df: pd.DataFrame) -> list[str]:
   if "query_id" not in working_df.columns:
     working_df["query_id"] = "unknown"
 
-  working_df["expected_units"] = pd.to_numeric(working_df["expected_units"], errors="coerce").fillna(0)
-  working_df["records_written"] = pd.to_numeric(working_df["records_written"], errors="coerce").fillna(0)
+  working_df["expected_units"] = pd.to_numeric(
+    working_df["expected_units"],
+    errors="coerce",
+  ).fillna(0)
+
+  working_df["records_written"] = pd.to_numeric(
+    working_df["records_written"],
+    errors="coerce",
+  ).fillna(0)
 
   working_df["efficiency_ratio"] = working_df.apply(
-    lambda row: (row["records_written"] / row["expected_units"]) if row["expected_units"] > 0 else 0,
+    lambda row: (row["records_written"] / row["expected_units"])
+    if row["expected_units"] > 0
+    else 0,
     axis=1,
   )
 
-  no_data_df = working_df[working_df["collection_status"] == "no_data"]
-  failed_df = working_df[working_df["collection_status"] == "failed"]
-  low_efficiency_df = working_df[working_df["efficiency_ratio"] < 0.25]
+  weak_queries = working_df.sort_values(
+    ["efficiency_ratio", "records_written"],
+    ascending=[True, True],
+  ).head(3)
 
-  if not no_data_df.empty:
-    top_no_data = (
-      no_data_df.groupby("topic", as_index=False)["query_id"]
-      .count()
-      .rename(columns={"query_id": "count"}) # type: ignore
-      .sort_values("count", ascending=False)
-      .head(3)
-    )
-    for _, row in top_no_data.iterrows():
-      recommendations.append(
-        f"Topic '{row['topic']}' produced no data in {int(row['count'])} query runs. Consider refining the query wording, broadening the search intent, or increasing the lookback window."
-      )
-
-  if not failed_df.empty:
-    top_failed = (
-      failed_df.groupby("topic", as_index=False)["query_id"]
-      .count()
-      .rename(columns={"query_id": "count"}) # type: ignore
-      .sort_values("count", ascending=False)
-      .head(3)
-    )
-    for _, row in top_failed.iterrows():
-      recommendations.append(
-        f"Topic '{row['topic']}' had {int(row['count'])} failed query runs. Review API quota, request retry handling, and platform-side failures for this topic."
-      )
-
-  if "expected_units" in query_df.columns and not low_efficiency_df.empty:
-    weak_queries = (
-      low_efficiency_df.sort_values(["efficiency_ratio", "records_written"], ascending=[True, True])
-      [["query_id", "topic", "efficiency_ratio"]]
-      .drop_duplicates()
-      .head(3)
-    )
-    for _, row in weak_queries.iterrows():
-      recommendations.append(
-        f"Query '{row['query_id']}' underperformed for topic '{row['topic']}' with a low fulfillment ratio of {row['efficiency_ratio']:.2f}. This query should be rewritten or deprioritized."
-      )
-
-  strong_topics = (
-    working_df.groupby("topic", as_index=False)["records_written"]
-    .sum()
-    .sort_values("records_written", ascending=False) # type: ignore
-    .head(3)
-  )
-
-  for _, row in strong_topics.iterrows():
+  for _, row in weak_queries.iterrows():
     recommendations.append(
-      f"Topic '{row['topic']}' is currently one of the strongest contributors with {int(row['records_written'])} written records. Keep it in the stable daily query portfolio."
+      f"Query '{row['query_id']}' is underperforming for topic '{row['topic']}'. Rewrite or deprioritize it."
     )
 
-  unique_recommendations = []
-  seen = set()
-
-  for item in recommendations:
-    if item not in seen:
-      seen.add(item)
-      unique_recommendations.append(item)
-
-  if not unique_recommendations:
-    unique_recommendations.append(
-      "The current collection looks stable. The next step is to increase query diversity and historical depth before training predictive or prescriptive models."
+  if not recommendations:
+    recommendations.append(
+      "The current collection looks stable. Increase history depth before retraining forecasts."
     )
 
-  return unique_recommendations[:6]
+  return recommendations[:6]
