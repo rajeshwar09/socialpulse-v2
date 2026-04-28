@@ -98,12 +98,10 @@ def render_overview_tab(
     m3.metric("Comments Analysed in Current View", f"{comments_analysed:,}")
     st.caption(f"Latest ingestion date in current view: {latest_run_date}")
 
-    fig_ingestion = px.line(
+    fig_ingestion = px.bar(
       ingestion_df,
       x="run_date_label",
       y="written_records",
-      markers=True,
-      line_shape="spline",
       template="plotly_dark",
       title="Daily Ingestion Trend Till Date",
     )
@@ -111,6 +109,7 @@ def render_overview_tab(
       xaxis_title="Run Date",
       yaxis_title="Stored Records",
       height=420,
+      bargap=0.25,
     )
     st.plotly_chart(fig_ingestion, use_container_width=True)
 
@@ -136,7 +135,7 @@ def render_overview_tab(
       x="collection_date",
       y="avg_sentiment_score",
       markers=True,
-      line_shape="spline",
+      line_shape="linear",
       template="plotly_dark",
       title="Daily Audience Sentiment Trend",
     )
