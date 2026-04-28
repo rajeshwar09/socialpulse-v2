@@ -28,7 +28,7 @@ def _read_delta_table(path: Path) -> pd.DataFrame:
   return DeltaTable(str(path)).to_pandas()
 
 
-def load_topic_aliases() -> dict[str, dict[str, list[str]]]:
+def load_topic_aliases() -> dict[str, list[str]]:
   if not ALIAS_PATH.exists():
     return {}
   return json.loads(ALIAS_PATH.read_text(encoding="utf-8"))
@@ -49,23 +49,31 @@ def resolve_analysis_query(query: str) -> dict[str, str | list[str] | None]:
   matched_genre = None
   matched_aliases: list[str] = []
 
-  for genre, topic_map in alias_map.items():
-    for topic, aliases in topic_map.items():
-      for alias in aliases:
-        alias_clean = alias.strip().lower()
-        if alias_clean and (
-          cleaned == alias_clean
-          or cleaned in alias_clean
-          or alias_clean in cleaned
-        ):
-          matched_topic = topic
-          matched_genre = genre
-          matched_aliases.append(alias)
-          break
-      if matched_topic:
+  for topic, aliases in alias_map.items():
+    for alias in aliases:
+      alias_clean = str(alias).strip().lower()
+      if alias_clean and (
+        cleaned == alias_clean
+        or cleaned in alias_clean
+        or alias_clean in cleaned
+      ):
+        matched_topic = topic
+        matched_aliases.append(alias)
         break
-    if matched_genre:
+    if matched_topic:
       break
+
+  if matched_topic is not None:
+    query_registry_path = Path("configs/query_registry.json")
+    if query_registry_path.exists():
+      try:
+        payload = json.loads(query_registry_path.read_text(encoding="utf-8"))
+        for row in payload:
+          if str(row.get("topic", "")).strip().lower() == str(matched_topic).strip().lower():
+            matched_genre = str(row.get("genre", "")).strip().lower() or None
+            break
+      except Exception:
+        matched_genre = None
 
   return {
     "raw_query": cleaned,
@@ -255,6 +263,9 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
   sentiment_keyword_df = _read_delta_table(gold_root / "youtube_sentiment_keyword_frequency")
   sentiment_overview_kpis_df = _read_delta_table(gold_root / "youtube_sentiment_overview_kpis")
 
+  predictive_forecast_summary_df = _read_delta_table(gold_root / "youtube_comments_forecast_summary")
+  predictive_forecast_7d_df = _read_delta_table(gold_root / "youtube_comments_forecast_7d")
+
   for frame in [overview_df, collection_df, query_df]:
     if not frame.empty and "run_date" in frame.columns:
       frame["run_date"] = pd.to_datetime(frame["run_date"], errors="coerce")
@@ -272,6 +283,22 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
       frame["collection_date"] = pd.to_datetime(frame["collection_date"], errors="coerce")
       frame["collection_date_label"] = frame["collection_date"].dt.strftime("%Y-%m-%d")
 
+  for frame in [sentiment_topic_summary_df]:
+    if not frame.empty and "built_at" in frame.columns:
+      frame["built_at"] = pd.to_datetime(frame["built_at"], errors="coerce")
+
+  for frame in [predictive_forecast_summary_df]:
+    if not frame.empty:
+      for column in ["history_start_date", "history_end_date", "built_at"]:
+        if column in frame.columns:
+          frame[column] = pd.to_datetime(frame[column], errors="coerce")
+
+  for frame in [predictive_forecast_7d_df]:
+    if not frame.empty:
+      for column in ["forecast_date", "built_at"]:
+        if column in frame.columns:
+          frame[column] = pd.to_datetime(frame[column], errors="coerce")
+
   return {
     "overview": overview_df,
     "collection": collection_df,
@@ -285,6 +312,8 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
     "sentiment_weekday_hour_engagement": sentiment_weekday_hour_df,
     "sentiment_keyword_frequency": sentiment_keyword_df,
     "sentiment_overview_kpis": sentiment_overview_kpis_df,
+    "predictive_forecast_summary": predictive_forecast_summary_df,
+    "predictive_forecast_7d": predictive_forecast_7d_df,
   }
 
 
@@ -394,6 +423,7 @@ def apply_dashboard_filters(
 
   return filtered_collection, filtered_query, filtered_comments
 
+
 def _filter_sentiment_frame(
   df: pd.DataFrame,
   selected_topics: list[str],
@@ -423,7 +453,10 @@ def _filter_sentiment_frame(
       filtered = filtered[filtered[date_column] >= start_ts]
 
     if end_date is not None:
-      end_ts = _align_timestamp_to_series_tz(filtered[date_column], pd.Timestamp(end_date) + pd.Timedelta(days=1))
+      end_ts = _align_timestamp_to_series_tz(
+        filtered[date_column],
+        pd.Timestamp(end_date) + pd.Timedelta(days=1),
+      )
       filtered = filtered[filtered[date_column] < end_ts]
 
   if filtered_sentiment_comments is not None and not filtered_sentiment_comments.empty:
@@ -461,6 +494,7 @@ def _filter_sentiment_frame(
         filtered = filtered[filtered["video_id"].astype(str).isin(allowed_video_ids)]
 
   return filtered
+
 
 def apply_sentiment_gold_filters(
   sentiment_daily_summary_df: pd.DataFrame,
