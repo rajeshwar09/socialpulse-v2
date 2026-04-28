@@ -17,6 +17,10 @@ from socialpulse_v2.dashboard.data_access import (
   resolve_analysis_query,
 )
 
+from socialpulse_v2.orchestration.run_custom_youtube_query_collection import (
+  run_custom_youtube_query_pipeline,
+)
+
 
 st.set_page_config(
   page_title="SocialPulse V2 Dashboard",
@@ -97,6 +101,10 @@ def main() -> None:
     )
     return
 
+  analysis_context = resolve_analysis_query("")
+  matched_topic = analysis_context.get("matched_topic")
+  matched_genre = analysis_context.get("matched_genre")
+
   with st.sidebar:
     st.header("Dashboard Filters")
 
@@ -125,6 +133,105 @@ def main() -> None:
       placeholder="Example: travel, hotels, food, phones",
       help="Type a keyword. The dashboard will match comment text directly and also map known keywords into the related topic and genre.",
     )
+
+    analysis_context = resolve_analysis_query(analysis_query)
+    matched_topic = analysis_context.get("matched_topic")
+    matched_genre = analysis_context.get("matched_genre")
+
+    st.markdown("---")
+    st.subheader("Collect New Query")
+
+    with st.form("dynamic_query_collection_form"):
+      custom_query_text = st.text_input(
+        "New query to collect now",
+        value=analysis_query.strip(),
+        placeholder="Example: budget smartphone review",
+        help="This will run a one-off YouTube collection for the typed query and refresh the marts.",
+      )
+
+      col_a, col_b = st.columns(2)
+      custom_topic = col_a.text_input(
+        "Topic label (optional)",
+        value=str(matched_topic or "") if "matched_topic" in locals() else "",
+        placeholder="Example: smartphones",
+      )
+      custom_genre = col_b.text_input(
+        "Genre label (optional)",
+        value=str(matched_genre or "") if "matched_genre" in locals() else "",
+        placeholder="Example: technology",
+      )
+
+      col_c, col_d = st.columns(2)
+      custom_priority = col_c.number_input(
+        "Priority",
+        min_value=1,
+        max_value=10,
+        value=6,
+        step=1,
+      )
+      custom_expected_units = col_d.number_input(
+        "Expected units",
+        min_value=20,
+        max_value=500,
+        value=100,
+        step=10,
+      )
+
+      col_e, col_f = st.columns(2)
+      custom_search_results = col_e.number_input(
+        "Search results limit",
+        min_value=1,
+        max_value=50,
+        value=10,
+        step=1,
+      )
+      custom_comments_per_video = col_f.number_input(
+        "Comments per video limit",
+        min_value=1,
+        max_value=100,
+        value=40,
+        step=1,
+      )
+
+      custom_lookback_days = st.slider(
+        "Lookback days",
+        min_value=1,
+        max_value=30,
+        value=14,
+      )
+
+      add_to_daily_registry = st.checkbox(
+        "Keep this query active for future daily runs",
+        value=False,
+      )
+
+      run_custom_query = st.form_submit_button(
+        "Run custom query collection",
+        use_container_width=True,
+      )
+
+    if run_custom_query:
+      try:
+        with st.spinner("Running custom query collection and rebuilding sentiment marts..."):
+          result = run_custom_youtube_query_pipeline(
+            query_text=custom_query_text,
+            topic=custom_topic or None,
+            genre=custom_genre or None,
+            priority=int(custom_priority),
+            expected_units=int(custom_expected_units),
+            search_results_limit=int(custom_search_results),
+            comments_per_video_limit=int(custom_comments_per_video),
+            lookback_days=int(custom_lookback_days),
+            add_to_daily_registry=bool(add_to_daily_registry),
+          )
+
+        st.cache_data.clear()
+        st.success(
+          f"Custom query collected successfully. Query ID: {result['query_id']} | Run ID: {result['run_id']} | Comments collected: {result['total_comments_collected']}"
+        )
+        st.rerun()
+      except Exception as exc:
+        st.error(f"Custom query collection failed: {exc}")
 
     selected_topics = st.multiselect(
       "Select topic",

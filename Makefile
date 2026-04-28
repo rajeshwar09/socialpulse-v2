@@ -65,5 +65,8 @@ run-gold-youtube-sentiment-all:
 	$(MAKE) run-gold-youtube-sentiment
 	$(MAKE) run-gold-youtube-sentiment-descriptive
 
+run-custom-youtube-query:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_custom_youtube_query_collection
+
 tree:
 	find . -maxdepth 4 | sort

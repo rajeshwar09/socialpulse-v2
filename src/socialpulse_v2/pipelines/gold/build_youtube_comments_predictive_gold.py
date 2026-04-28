@@ -69,6 +69,20 @@ def build_daily_topic_metrics_df(source_df: DataFrame) -> DataFrame:
   ).otherwise(F.col("genre"))
 
   comment_like_col = F.coalesce(F.col("comment_like_count").cast("long"), F.lit(0))
+  reply_count_col = F.coalesce(F.col("reply_count").cast("long"), F.lit(0))
+
+  available_columns = set(source_df.columns)
+
+  def optional_double_col(primary: str, *alternates: str):
+    for candidate in (primary, *alternates):
+      if candidate in available_columns:
+        return F.col(candidate).cast("double")
+    return F.lit(None).cast("double")
+
+  sentiment_confidence_col = optional_double_col("sentiment_confidence")
+  negative_probability_col = optional_double_col("sentiment_negative_prob", "negative_probability")
+  neutral_probability_col = optional_double_col("sentiment_neutral_prob", "neutral_probability")
+  positive_probability_col = optional_double_col("sentiment_positive_prob", "positive_probability")
 
   out = (
     source_df
@@ -84,8 +98,13 @@ def build_daily_topic_metrics_df(source_df: DataFrame) -> DataFrame:
       F.sum(F.when(F.col("sentiment_label") == "positive", 1).otherwise(0)).alias("positive_comments"),
       F.sum(F.when(F.col("sentiment_label") == "neutral", 1).otherwise(0)).alias("neutral_comments"),
       F.sum(F.when(F.col("sentiment_label") == "negative", 1).otherwise(0)).alias("negative_comments"),
-      F.round(F.avg(F.col("sentiment_confidence").cast("double")), 4).alias("avg_sentiment_confidence"),
+      F.round(F.avg(sentiment_confidence_col), 4).alias("avg_sentiment_confidence"),
+      F.round(F.avg(negative_probability_col), 4).alias("avg_negative_probability"),
+      F.round(F.avg(neutral_probability_col), 4).alias("avg_neutral_probability"),
+      F.round(F.avg(positive_probability_col), 4).alias("avg_positive_probability"),
       F.sum(comment_like_col).alias("total_like_count"),
+      F.sum(reply_count_col).alias("total_reply_count"),
+      F.round(F.avg(comment_like_col.cast("double")), 4).alias("avg_like_count"),
     )
     .withColumn("built_at", F.current_timestamp())
     .orderBy("metric_date", "genre", "topic")
