@@ -742,6 +742,20 @@
     "lookback_days": 30
   },
   {
+    "query_id": "yt-custom-cricket-ipl_reaction",
+    "platform": "youtube",
+    "topic": "cricket",
+    "genre": "sports",
+    "query_text": "ipl reaction",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 50,
+    "comments_per_video_limit": 100,
+    "lookback_days": 14
+  },
+  {
     "query_id": "yt-f1-wave-335",
     "platform": "youtube",
     "topic": "f1",

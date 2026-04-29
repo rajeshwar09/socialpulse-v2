@@ -69,7 +69,7 @@ def get_data() -> dict[str, pd.DataFrame]:
 
 
 def main() -> None:
-  st.title("SocialPulse V2")
+  st.title("SocialPulse")
   st.caption(
     "Comment and genre based YouTube social listening dashboard powered by sentiment enrichment on comment data."
   )
@@ -401,12 +401,13 @@ def main() -> None:
 
   with tab2:
     render_descriptive_tab(
+      filtered_collection=filtered_collection,
+      filtered_comments=filtered_sentiment_comments,
       filtered_sentiment_topic_summary=filtered_sentiment_topic_summary,
       filtered_sentiment_daily_trend=filtered_sentiment_daily_trend,
       filtered_sentiment_video_summary=filtered_sentiment_video_summary,
       filtered_sentiment_weekday_hour=filtered_sentiment_weekday_hour,
       filtered_sentiment_keyword=filtered_sentiment_keyword,
-      filtered_sentiment_comments=filtered_sentiment_comments,
       weekday_order=WEEKDAY_ORDER,
       format_number=format_number,
       format_hour_12=format_hour_12,
