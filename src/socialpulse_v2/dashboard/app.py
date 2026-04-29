@@ -16,7 +16,6 @@ from socialpulse_v2.dashboard.data_access import (
   load_dashboard_tables,
   resolve_analysis_query,
 )
-
 from socialpulse_v2.orchestration.run_custom_youtube_query_collection import (
   run_custom_youtube_query_pipeline,
 )
@@ -88,6 +87,8 @@ def main() -> None:
   sentiment_weekday_hour_df = tables.get("sentiment_weekday_hour_engagement", pd.DataFrame())
   sentiment_keyword_df = tables.get("sentiment_keyword_frequency", pd.DataFrame())
   sentiment_overview_kpis_df = tables.get("sentiment_overview_kpis", pd.DataFrame())
+  predictive_forecast_summary_df = tables.get("predictive_forecast_summary", pd.DataFrame())
+  predictive_forecast_7d_df = tables.get("predictive_forecast_7d", pd.DataFrame())
 
   if (
     overview_df.empty
@@ -152,12 +153,12 @@ def main() -> None:
       col_a, col_b = st.columns(2)
       custom_topic = col_a.text_input(
         "Topic label (optional)",
-        value=str(matched_topic or "") if "matched_topic" in locals() else "",
+        value=str(matched_topic or ""),
         placeholder="Example: smartphones",
       )
       custom_genre = col_b.text_input(
         "Genre label (optional)",
-        value=str(matched_genre or "") if "matched_genre" in locals() else "",
+        value=str(matched_genre or ""),
         placeholder="Example: technology",
       )
 
@@ -247,9 +248,6 @@ def main() -> None:
       help="Leave empty to include all genres.",
     )
 
-    min_date = None
-    max_date = None
-
     date_pool = pd.Series(dtype="datetime64[ns]")
     if not sentiment_daily_trend_df.empty and "collection_date" in sentiment_daily_trend_df.columns:
       date_pool = pd.to_datetime(sentiment_daily_trend_df["collection_date"], errors="coerce").dropna()
@@ -257,23 +255,28 @@ def main() -> None:
     if date_pool.empty and not collection_df.empty and "run_date" in collection_df.columns:
       date_pool = pd.to_datetime(collection_df["run_date"], errors="coerce").dropna()
 
-    if not date_pool.empty:
-      min_date = date_pool.min().date()
-      max_date = date_pool.max().date()
+    min_date = date_pool.min().date() if not date_pool.empty else None
+    max_date = date_pool.max().date() if not date_pool.empty else None
 
-    start_date = st.date_input(
-      "Start date",
-      value=min_date,
-      min_value=min_date,
-      max_value=max_date,
-    ) if min_date else None
+    start_date = (
+      st.date_input(
+        "Start date",
+        value=min_date,
+        min_value=min_date,
+        max_value=max_date,
+      )
+      if min_date else None
+    )
 
-    end_date = st.date_input(
-      "End date",
-      value=max_date,
-      min_value=min_date,
-      max_value=max_date,
-    ) if max_date else None
+    end_date = (
+      st.date_input(
+        "End date",
+        value=max_date,
+        min_value=min_date,
+        max_value=max_date,
+      )
+      if max_date else None
+    )
 
   analysis_context = resolve_analysis_query(analysis_query)
   matched_topic = analysis_context.get("matched_topic")
@@ -281,7 +284,7 @@ def main() -> None:
 
   if analysis_query.strip() and matched_topic and matched_genre:
     st.info(
-      f"Typed keyword '{analysis_query.strip()}' is being mapped to topic '{pretty_text(matched_topic)}' under genre '{pretty_text(matched_genre)}'. The charts below combine direct keyword matches and the broader topic/genre context."
+      f"Typed keyword '{analysis_query.strip()}' is first filtered strictly. If no direct matches are found, the dashboard falls back to topic '{pretty_text(matched_topic)}' under genre '{pretty_text(matched_genre)}'."
     )
 
   filtered_collection, filtered_query, filtered_sentiment_comments = apply_dashboard_filters(
@@ -320,13 +323,41 @@ def main() -> None:
   filtered_sentiment_overview_kpis = filtered_sentiment["sentiment_overview_kpis"]
 
   if not filtered_sentiment_comments.empty:
-    total_comments = int(filtered_sentiment_comments["comment_id"].nunique()) if "comment_id" in filtered_sentiment_comments.columns else len(filtered_sentiment_comments)
-    avg_sentiment = float(filtered_sentiment_comments["sentiment_score"].mean()) if "sentiment_score" in filtered_sentiment_comments.columns else 0.0
-    positive_ratio = float((filtered_sentiment_comments["sentiment_label"] == "positive").mean()) if "sentiment_label" in filtered_sentiment_comments.columns else 0.0
-    negative_ratio = float((filtered_sentiment_comments["sentiment_label"] == "negative").mean()) if "sentiment_label" in filtered_sentiment_comments.columns else 0.0
-    topics_covered = int(filtered_sentiment_comments["topic"].dropna().astype(str).nunique()) if "topic" in filtered_sentiment_comments.columns else 0
-    genres_covered = int(filtered_sentiment_comments["genre"].dropna().astype(str).nunique()) if "genre" in filtered_sentiment_comments.columns else 0
-    videos_covered = int(filtered_sentiment_comments["video_id"].dropna().astype(str).nunique()) if "video_id" in filtered_sentiment_comments.columns else 0
+    total_comments = (
+      int(filtered_sentiment_comments["comment_id"].nunique())
+      if "comment_id" in filtered_sentiment_comments.columns
+      else len(filtered_sentiment_comments)
+    )
+    avg_sentiment = (
+      float(filtered_sentiment_comments["sentiment_score"].mean())
+      if "sentiment_score" in filtered_sentiment_comments.columns
+      else 0.0
+    )
+    positive_ratio = (
+      float((filtered_sentiment_comments["sentiment_label"] == "positive").mean())
+      if "sentiment_label" in filtered_sentiment_comments.columns
+      else 0.0
+    )
+    negative_ratio = (
+      float((filtered_sentiment_comments["sentiment_label"] == "negative").mean())
+      if "sentiment_label" in filtered_sentiment_comments.columns
+      else 0.0
+    )
+    topics_covered = (
+      int(filtered_sentiment_comments["topic"].dropna().astype(str).nunique())
+      if "topic" in filtered_sentiment_comments.columns
+      else 0
+    )
+    genres_covered = (
+      int(filtered_sentiment_comments["genre"].dropna().astype(str).nunique())
+      if "genre" in filtered_sentiment_comments.columns
+      else 0
+    )
+    videos_covered = (
+      int(filtered_sentiment_comments["video_id"].dropna().astype(str).nunique())
+      if "video_id" in filtered_sentiment_comments.columns
+      else 0
+    )
   elif not filtered_sentiment_topic_summary.empty:
     total_comments = int(filtered_sentiment_topic_summary["comments_count"].sum()) if "comments_count" in filtered_sentiment_topic_summary.columns else 0
     avg_sentiment = float(filtered_sentiment_topic_summary["avg_sentiment_score"].mean()) if "avg_sentiment_score" in filtered_sentiment_topic_summary.columns else 0.0
@@ -399,6 +430,9 @@ def main() -> None:
   with tab4:
     render_predictive_tab(
       filtered_sentiment_daily_trend=filtered_sentiment_daily_trend,
+      filtered_sentiment_comments=filtered_sentiment_comments,
+      predictive_forecast_summary_df=predictive_forecast_summary_df,
+      predictive_forecast_7d_df=predictive_forecast_7d_df,
       format_number=format_number,
       format_score=format_score,
       show_empty_state=show_empty_state,
@@ -414,11 +448,11 @@ def main() -> None:
       show_empty_state=show_empty_state,
     )
 
-  with st.expander("Pipeline Health (secondary)"):
-    st.write("This is only a supporting operational view and not the main story.")
-    st.write(f"Collection rows in current filter: {len(filtered_collection)}")
-    st.write(f"Query rows in current filter: {len(filtered_query)}")
-    st.write(f"Comment rows in current filter: {len(filtered_sentiment_comments)}")
+  # with st.expander("Pipeline Health (secondary)"):
+  #   st.write("This is only a supporting operational view and not the main story.")
+  #   st.write(f"Collection rows in current filter: {len(filtered_collection)}")
+  #   st.write(f"Query rows in current filter: {len(filtered_query)}")
+  #   st.write(f"Comment rows in current filter: {len(filtered_sentiment_comments)}")
 
 
 if __name__ == "__main__":

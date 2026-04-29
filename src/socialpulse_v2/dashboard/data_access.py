@@ -28,7 +28,7 @@ def _read_delta_table(path: Path) -> pd.DataFrame:
   return DeltaTable(str(path)).to_pandas()
 
 
-def load_topic_aliases() -> dict[str, dict[str, list[str]]]:
+def load_topic_aliases() -> dict[str, list[str]]:
   if not ALIAS_PATH.exists():
     return {}
   return json.loads(ALIAS_PATH.read_text(encoding="utf-8"))
@@ -49,23 +49,32 @@ def resolve_analysis_query(query: str) -> dict[str, str | list[str] | None]:
   matched_genre = None
   matched_aliases: list[str] = []
 
-  for genre, topic_map in alias_map.items():
-    for topic, aliases in topic_map.items():
-      for alias in aliases:
-        alias_clean = alias.strip().lower()
-        if alias_clean and (
-          cleaned == alias_clean
-          or cleaned in alias_clean
-          or alias_clean in cleaned
-        ):
-          matched_topic = topic
-          matched_genre = genre
-          matched_aliases.append(alias)
-          break
-      if matched_topic:
+  for topic, aliases in alias_map.items():
+    alias_list = aliases if isinstance(aliases, list) else []
+    for alias in alias_list:
+      alias_clean = str(alias).strip().lower()
+      if alias_clean and (
+        cleaned == alias_clean
+        or cleaned in alias_clean
+        or alias_clean in cleaned
+      ):
+        matched_topic = str(topic).strip().lower()
+        matched_aliases.append(str(alias))
         break
-    if matched_genre:
+    if matched_topic:
       break
+
+  if matched_topic is not None:
+    query_registry_path = Path("configs/query_registry.json")
+    if query_registry_path.exists():
+      try:
+        payload = json.loads(query_registry_path.read_text(encoding="utf-8"))
+        for row in payload:
+          if str(row.get("topic", "")).strip().lower() == matched_topic:
+            matched_genre = str(row.get("genre", "")).strip().lower() or None
+            break
+      except Exception:
+        matched_genre = None
 
   return {
     "raw_query": cleaned,
@@ -75,25 +84,118 @@ def resolve_analysis_query(query: str) -> dict[str, str | list[str] | None]:
   }
 
 
-def _text_mask(df: pd.DataFrame, columns: list[str], query: str) -> pd.Series:
+def _normalize_text_series(df: pd.DataFrame, column: str) -> pd.Series:
+  if column not in df.columns:
+    return pd.Series([""] * len(df), index=df.index)
+  return df[column].fillna("").astype(str).str.strip().str.lower()
+
+
+def _exact_topic_genre_mask(df: pd.DataFrame, cleaned_query: str) -> pd.Series:
   if df.empty:
     return pd.Series(dtype="bool")
 
-  cleaned_query = query.strip().lower()
-  if not cleaned_query:
-    return pd.Series([True] * len(df), index=df.index)
+  mask = pd.Series([False] * len(df), index=df.index)
+
+  if "topic" in df.columns:
+    mask = mask | _normalize_text_series(df, "topic").eq(cleaned_query)
+
+  if "genre" in df.columns:
+    mask = mask | _normalize_text_series(df, "genre").eq(cleaned_query)
+
+  return mask
+
+
+def _query_text_mask(df: pd.DataFrame, cleaned_query: str) -> pd.Series:
+  if df.empty:
+    return pd.Series(dtype="bool")
 
   mask = pd.Series([False] * len(df), index=df.index)
-  for column in columns:
-    if column in df.columns:
-      mask = mask | (
-        df[column]
-        .fillna("")
-        .astype(str)
-        .str.lower()
-        .str.contains(cleaned_query, regex=False)
-      )
+
+  if "query_text" in df.columns:
+    mask = mask | _normalize_text_series(df, "query_text").str.contains(
+      cleaned_query,
+      regex=False,
+    )
+
   return mask
+
+
+def _alias_context_mask(
+  df: pd.DataFrame,
+  matched_topic: str | None,
+  matched_genre: str | None,
+) -> pd.Series:
+  if df.empty:
+    return pd.Series(dtype="bool")
+
+  mask = pd.Series([False] * len(df), index=df.index)
+
+  if matched_topic and "topic" in df.columns:
+    mask = mask | _normalize_text_series(df, "topic").eq(str(matched_topic).lower())
+
+  if matched_genre and "genre" in df.columns:
+    mask = mask | _normalize_text_series(df, "genre").eq(str(matched_genre).lower())
+
+  return mask
+
+
+def _determine_query_scope_mode(
+  cleaned_query: str,
+  matched_topic: str | None,
+  matched_genre: str | None,
+  filtered_comments: pd.DataFrame,
+  filtered_collection: pd.DataFrame,
+  filtered_query: pd.DataFrame,
+) -> str | None:
+  candidates = [
+    filtered_comments,
+    filtered_collection,
+    filtered_query,
+  ]
+
+  for candidate in candidates:
+    if candidate.empty:
+      continue
+    exact_mask = _exact_topic_genre_mask(candidate, cleaned_query)
+    if not exact_mask.empty and exact_mask.any():
+      return "exact_topic_or_genre"
+
+  for candidate in candidates:
+    if candidate.empty:
+      continue
+    query_text_mask = _query_text_mask(candidate, cleaned_query)
+    if not query_text_mask.empty and query_text_mask.any():
+      return "query_text"
+
+  if matched_topic or matched_genre:
+    return "alias_context"
+
+  return None
+
+
+def _apply_scope_to_frame(
+  df: pd.DataFrame,
+  scope_mode: str | None,
+  cleaned_query: str,
+  matched_topic: str | None,
+  matched_genre: str | None,
+) -> pd.DataFrame:
+  if df.empty:
+    return df.copy()
+
+  if scope_mode == "exact_topic_or_genre":
+    mask = _exact_topic_genre_mask(df, cleaned_query)
+  elif scope_mode == "query_text":
+    mask = _query_text_mask(df, cleaned_query)
+  elif scope_mode == "alias_context":
+    mask = _alias_context_mask(df, matched_topic, matched_genre)
+  else:
+    mask = pd.Series([True] * len(df), index=df.index)
+
+  if mask.empty or not mask.any():
+    return df.iloc[0:0].copy()
+
+  return df[mask].copy()
 
 
 def _read_comment_level_data() -> pd.DataFrame:
@@ -224,8 +326,10 @@ def _align_timestamp_to_series_tz(series: pd.Series, value) -> pd.Timestamp:
   ts = pd.Timestamp(value)
 
   tz = None
-  if pd.api.types.is_datetime64tz_dtype(series):
+  try:
     tz = series.dt.tz
+  except Exception:
+    tz = None
 
   if tz is not None:
     if ts.tzinfo is None:
@@ -255,6 +359,9 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
   sentiment_keyword_df = _read_delta_table(gold_root / "youtube_sentiment_keyword_frequency")
   sentiment_overview_kpis_df = _read_delta_table(gold_root / "youtube_sentiment_overview_kpis")
 
+  predictive_forecast_summary_df = _read_delta_table(gold_root / "youtube_comments_forecast_summary")
+  predictive_forecast_7d_df = _read_delta_table(gold_root / "youtube_comments_forecast_7d")
+
   for frame in [overview_df, collection_df, query_df]:
     if not frame.empty and "run_date" in frame.columns:
       frame["run_date"] = pd.to_datetime(frame["run_date"], errors="coerce")
@@ -272,6 +379,22 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
       frame["collection_date"] = pd.to_datetime(frame["collection_date"], errors="coerce")
       frame["collection_date_label"] = frame["collection_date"].dt.strftime("%Y-%m-%d")
 
+  for frame in [sentiment_topic_summary_df]:
+    if not frame.empty and "built_at" in frame.columns:
+      frame["built_at"] = pd.to_datetime(frame["built_at"], errors="coerce")
+
+  for frame in [predictive_forecast_summary_df]:
+    if not frame.empty:
+      for column in ["history_start_date", "history_end_date", "built_at"]:
+        if column in frame.columns:
+          frame[column] = pd.to_datetime(frame[column], errors="coerce")
+
+  for frame in [predictive_forecast_7d_df]:
+    if not frame.empty:
+      for column in ["forecast_date", "built_at"]:
+        if column in frame.columns:
+          frame[column] = pd.to_datetime(frame[column], errors="coerce")
+
   return {
     "overview": overview_df,
     "collection": collection_df,
@@ -285,6 +408,8 @@ def load_dashboard_tables() -> dict[str, pd.DataFrame]:
     "sentiment_weekday_hour_engagement": sentiment_weekday_hour_df,
     "sentiment_keyword_frequency": sentiment_keyword_df,
     "sentiment_overview_kpis": sentiment_overview_kpis_df,
+    "predictive_forecast_summary": predictive_forecast_summary_df,
+    "predictive_forecast_7d": predictive_forecast_7d_df,
   }
 
 
@@ -334,6 +459,7 @@ def apply_dashboard_filters(
       ]
 
   analysis_context = resolve_analysis_query(analysis_query or "")
+  cleaned_query = str(analysis_context["raw_query"] or "").strip().lower()
   matched_topic = analysis_context["matched_topic"]
   matched_genre = analysis_context["matched_genre"]
 
@@ -342,47 +468,52 @@ def apply_dashboard_filters(
       filtered_comments = filtered_comments[filtered_comments["topic"].isin(selected_topics)]
     if selected_genres and "genre" in filtered_comments.columns:
       filtered_comments = filtered_comments[filtered_comments["genre"].isin(selected_genres)]
+
     if start_date is not None and "comment_published_at" in filtered_comments.columns:
       start_ts = pd.Timestamp(start_date).tz_localize("UTC")
       filtered_comments = filtered_comments[
         filtered_comments["comment_published_at"] >= start_ts
       ]
+
     if end_date is not None and "comment_published_at" in filtered_comments.columns:
       end_ts = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).tz_localize("UTC")
       filtered_comments = filtered_comments[
         filtered_comments["comment_published_at"] < end_ts
       ]
 
-    if analysis_query and analysis_query.strip():
-      direct_mask = _text_mask(
+  if cleaned_query:
+    scope_mode = _determine_query_scope_mode(
+      cleaned_query=cleaned_query,
+      matched_topic=matched_topic,
+      matched_genre=matched_genre,
+      filtered_comments=filtered_comments,
+      filtered_collection=filtered_collection,
+      filtered_query=filtered_query,
+    )
+
+    filtered_collection = _apply_scope_to_frame(
+      filtered_collection,
+      scope_mode,
+      cleaned_query,
+      matched_topic,
+      matched_genre,
+    )
+    filtered_query = _apply_scope_to_frame(
+      filtered_query,
+      scope_mode,
+      cleaned_query,
+      matched_topic,
+      matched_genre,
+    )
+
+    if comments_df is not None:
+      filtered_comments = _apply_scope_to_frame(
         filtered_comments,
-        ["query_text", "topic", "genre", "video_title", "channel_title", "comment_text"],
-        analysis_query,
+        scope_mode,
+        cleaned_query,
+        matched_topic,
+        matched_genre,
       )
-
-      alias_mask = pd.Series([False] * len(filtered_comments), index=filtered_comments.index)
-      if matched_topic and "topic" in filtered_comments.columns:
-        alias_mask = alias_mask | (
-          filtered_comments["topic"].astype(str) == str(matched_topic)
-        )
-      if matched_genre and "genre" in filtered_comments.columns:
-        alias_mask = alias_mask | (
-          filtered_comments["genre"].astype(str) == str(matched_genre)
-        )
-
-      filtered_comments = filtered_comments[direct_mask | alias_mask]
-
-      if matched_topic and "topic" in filtered_collection.columns and "genre" in filtered_collection.columns:
-        filtered_collection = filtered_collection[
-          filtered_collection["topic"].astype(str).isin([str(matched_topic)])
-          | filtered_collection["genre"].astype(str).isin([str(matched_genre)])
-        ]
-
-      if matched_topic and "topic" in filtered_query.columns and "genre" in filtered_query.columns:
-        filtered_query = filtered_query[
-          filtered_query["topic"].astype(str).isin([str(matched_topic)])
-          | filtered_query["genre"].astype(str).isin([str(matched_genre)])
-        ]
 
   if comments_df is None:
     return filtered_collection, filtered_query
@@ -419,43 +550,45 @@ def _filter_sentiment_frame(
       filtered = filtered[filtered[date_column] >= start_ts]
 
     if end_date is not None:
-      end_ts = _align_timestamp_to_series_tz(filtered[date_column], end_date)
-      filtered = filtered[filtered[date_column] <= end_ts]
-
-  if analysis_query and analysis_query.strip():
-    direct_mask = _text_mask(
-      filtered,
-      ["topic", "genre", "video_title", "channel_title", "keyword"],
-      analysis_query,
-    )
-
-    matched_mask = pd.Series([False] * len(filtered), index=filtered.index)
-
-    if filtered_sentiment_comments is not None and not filtered_sentiment_comments.empty:
-      matched_topics = (
-        set(filtered_sentiment_comments["topic"].dropna().astype(str).tolist())
-        if "topic" in filtered_sentiment_comments.columns
-        else set()
+      end_ts = _align_timestamp_to_series_tz(
+        filtered[date_column],
+        pd.Timestamp(end_date) + pd.Timedelta(days=1),
       )
-      matched_genres = (
-        set(filtered_sentiment_comments["genre"].dropna().astype(str).tolist())
-        if "genre" in filtered_sentiment_comments.columns
-        else set()
-      )
-      matched_video_ids = (
-        set(filtered_sentiment_comments["video_id"].dropna().astype(str).tolist())
-        if "video_id" in filtered_sentiment_comments.columns
-        else set()
-      )
+      filtered = filtered[filtered[date_column] < end_ts]
 
-      if matched_topics and "topic" in filtered.columns:
-        matched_mask = matched_mask | filtered["topic"].astype(str).isin(matched_topics)
-      if matched_genres and "genre" in filtered.columns:
-        matched_mask = matched_mask | filtered["genre"].astype(str).isin(matched_genres)
-      if matched_video_ids and "video_id" in filtered.columns:
-        matched_mask = matched_mask | filtered["video_id"].astype(str).isin(matched_video_ids)
+  if filtered_sentiment_comments is not None and not filtered_sentiment_comments.empty:
+    if "topic" in filtered.columns and "topic" in filtered_sentiment_comments.columns:
+      allowed_topics = (
+        filtered_sentiment_comments["topic"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+      )
+      if allowed_topics:
+        filtered = filtered[filtered["topic"].astype(str).isin(allowed_topics)]
 
-    filtered = filtered[direct_mask | matched_mask]
+    if "genre" in filtered.columns and "genre" in filtered_sentiment_comments.columns:
+      allowed_genres = (
+        filtered_sentiment_comments["genre"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+      )
+      if allowed_genres:
+        filtered = filtered[filtered["genre"].astype(str).isin(allowed_genres)]
+
+    if "video_id" in filtered.columns and "video_id" in filtered_sentiment_comments.columns:
+      allowed_video_ids = (
+        filtered_sentiment_comments["video_id"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+      )
+      if allowed_video_ids:
+        filtered = filtered[filtered["video_id"].astype(str).isin(allowed_video_ids)]
 
   return filtered
 
