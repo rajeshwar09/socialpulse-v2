@@ -620,7 +620,13 @@ def render_descriptive_tab(
     else:
       scatter_df = (
         topic_engagement[
-          ["topic_display", "genre_display", "avg_sentiment_score", "avg_likes_per_comment", "matched_comments"]
+          [
+            "topic_display",
+            "genre_display",
+            "avg_sentiment_score",
+            "avg_likes_per_comment",
+            "matched_comments",
+          ]
         ]
         .copy()
         .sort_values("matched_comments", ascending=False)
@@ -633,26 +639,31 @@ def render_descriptive_tab(
         size="matched_comments",
         color="genre_display",
         hover_name="topic_display",
+        hover_data={
+          "genre_display": True,
+          "avg_sentiment_score": ":.3f",
+          "avg_likes_per_comment": ":.2f",
+          "matched_comments": ":,.0f",
+        },
+        labels={
+          "avg_sentiment_score": "Average Sentiment Score",
+          "avg_likes_per_comment": "Average Likes per Comment",
+          "matched_comments": "Matched Comments",
+          "genre_display": "Genre",
+          "topic_display": "Topic",
+        },
         template="plotly_dark",
         title="Sentiment versus Engagement by Topic",
         size_max=42,
       )
-      fig_scatter.update_traces(
-        hovertemplate=(
-          "Topic: %{hovertext}<br>"
-          "Genre: %{customdata[0]}<br>"
-          "Average sentiment: %{x:.3f}<br>"
-          "Average likes per comment: %{y:.2f}<br>"
-          "Matched comments: %{marker.size:,.0f}<extra></extra>"
-        ),
-        customdata=scatter_df[["genre_display"]],
-      )
+
       fig_scatter.update_layout(
         xaxis_title="Average Sentiment Score",
         yaxis_title="Average Likes per Comment",
         legend_title="Genre",
         height=430,
       )
+
       st.plotly_chart(fig_scatter, use_container_width=True)
 
   with compare_right:
