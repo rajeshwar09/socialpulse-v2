@@ -69,7 +69,7 @@ def get_data() -> dict[str, pd.DataFrame]:
 
 
 def main() -> None:
-  st.title("SocialPulse V2")
+  st.title("SocialPulse")
   st.caption(
     "Comment and genre based YouTube social listening dashboard powered by sentiment enrichment on comment data."
   )
