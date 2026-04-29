@@ -448,11 +448,11 @@ def main() -> None:
       show_empty_state=show_empty_state,
     )
 
-  with st.expander("Pipeline Health (secondary)"):
-    st.write("This is only a supporting operational view and not the main story.")
-    st.write(f"Collection rows in current filter: {len(filtered_collection)}")
-    st.write(f"Query rows in current filter: {len(filtered_query)}")
-    st.write(f"Comment rows in current filter: {len(filtered_sentiment_comments)}")
+  # with st.expander("Pipeline Health (secondary)"):
+  #   st.write("This is only a supporting operational view and not the main story.")
+  #   st.write(f"Collection rows in current filter: {len(filtered_collection)}")
+  #   st.write(f"Query rows in current filter: {len(filtered_query)}")
+  #   st.write(f"Comment rows in current filter: {len(filtered_sentiment_comments)}")
 
 
 if __name__ == "__main__":

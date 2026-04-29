@@ -145,6 +145,24 @@ def _render_recommendation_card(
   )
 
 
+def _render_reason_card(
+  title: str,
+  topic: str,
+  genre: str,
+  explanation: str,
+) -> None:
+  st.markdown(
+    f"""
+<div style="padding:14px 16px; border:1px solid rgba(255,255,255,0.08); border-radius:14px; margin-bottom:12px; background:rgba(255,255,255,0.02); height:100%;">
+  <div style="font-size:1rem; font-weight:700; margin-bottom:8px;">{title}</div>
+  <div style="margin-bottom:6px;"><b>{_pretty_text(topic)}</b> · {_pretty_text(genre)}</div>
+  <div style="opacity:0.92;">{explanation}</div>
+</div>
+""",
+    unsafe_allow_html=True,
+  )
+
+
 def render_prescriptive_tab(
   filtered_sentiment_topic_summary: pd.DataFrame,
   filtered_sentiment_keyword: pd.DataFrame,
@@ -227,7 +245,7 @@ def render_prescriptive_tab(
   st.markdown(
     f"""
 <div style="padding:14px 16px; border:1px solid rgba(255,255,255,0.08); border-radius:14px; margin-bottom:14px; background:rgba(255,255,255,0.02);">
-  The current filtered audience view shows <b>{len(risk_rows)}</b> topics that need close monitoring and <b>{len(growth_rows)}</b> topics that look suitable for expansion. 
+  The current filtered audience view shows <b>{len(risk_rows)}</b> topics that need close monitoring and <b>{len(growth_rows)}</b> topics that look suitable for expansion.
   The strongest immediate risk is <b>{risk_topic}</b> in <b>{risk_genre}</b>, while the strongest growth opportunity is <b>{growth_topic}</b> in <b>{growth_genre}</b>.
 </div>
 """,
@@ -242,15 +260,13 @@ def render_prescriptive_tab(
 
   st.markdown("### Recommended Actions")
 
-  action_rows: list[dict[str, str | float]] = []
-
   for _, row in risk_rows.iterrows():
     topic = str(row["topic"])
     genre = str(row["genre"])
     negative_words = _find_keywords(filtered_sentiment_keyword, topic, polarity="negative", limit=3)
 
     action_text = (
-      f"Track this topic more closely, review recent videos and comments, and investigate the negative driver words before expanding coverage."
+      "Track this topic more closely, review recent videos and comments, and investigate the negative driver words before expanding coverage."
     )
 
     _render_recommendation_card(
@@ -267,28 +283,19 @@ def render_prescriptive_tab(
       priority_score=float(row["monitoring_priority"]),
     )
 
-    action_rows.append(
-      {
-        "action": "Monitor Risk",
-        "topic": _pretty_text(topic),
-        "genre": _pretty_text(genre),
-        "priority_score": float(row["monitoring_priority"]),
-      }
-    )
-
   for _, row in growth_rows.iterrows():
     topic = str(row["topic"])
     genre = str(row["genre"])
     positive_words = _find_keywords(filtered_sentiment_keyword, topic, polarity="positive", limit=3)
 
     driver_text = (
-      f"Positive driver words suggest this topic is connecting well with viewers."
+      "Positive driver words suggest this topic is connecting well with viewers."
       if positive_words else
       "Audience response is positive enough to justify more collection or deeper monitoring."
     )
 
     action_text = (
-      f"Consider expanding collection in this area, increase query coverage, and use this topic as a benchmark for stronger audience response."
+      "Consider expanding collection in this area, increase query coverage, and use this topic as a benchmark for stronger audience response."
     )
 
     _render_recommendation_card(
@@ -303,15 +310,6 @@ def render_prescriptive_tab(
       driver_words=positive_words,
       action_text=f"{driver_text} {action_text}",
       priority_score=float(row["growth_priority"]),
-    )
-
-    action_rows.append(
-      {
-        "action": "Growth Opportunity",
-        "topic": _pretty_text(topic),
-        "genre": _pretty_text(genre),
-        "priority_score": float(row["growth_priority"]),
-      }
     )
 
   st.markdown("### Monitoring Priority by Topic")
@@ -341,36 +339,70 @@ def render_prescriptive_tab(
   )
   st.plotly_chart(fig_priority, use_container_width=True)
 
-  if action_rows:
-    action_df = pd.DataFrame(action_rows)
+  st.markdown("### Why These Recommendations Were Chosen")
+  st.caption(
+    "These signals explain the decision logic behind the actions above, so the recommendation does not rely on only one chart or one score."
+  )
 
-    st.markdown("### Action Breakdown by Genre")
-    st.caption(
-      "This chart shows how many action recommendations fall under each genre, split into monitoring needs and growth opportunities."
+  highest_negative_share = ranked_risk.sort_values(
+    ["negative_ratio", "comments_count"],
+    ascending=[False, False],
+  ).iloc[0]
+
+  largest_volume = working_df.sort_values(
+    ["comments_count", "videos_covered"],
+    ascending=[False, False],
+  ).iloc[0]
+
+  strongest_positive = ranked_growth.sort_values(
+    ["positive_ratio", "comments_count"],
+    ascending=[False, False],
+  ).iloc[0]
+
+  widest_coverage = working_df.sort_values(
+    ["videos_covered", "comments_count"],
+    ascending=[False, False],
+  ).iloc[0]
+
+  col1, col2 = st.columns(2)
+  with col1:
+    _render_reason_card(
+      "Highest Negative Share",
+      str(highest_negative_share["topic"]),
+      str(highest_negative_share["genre"]),
+      (
+        f"This topic has the strongest negative reaction share in the current view "
+        f"at {format_pct(highest_negative_share['negative_ratio'])}, so it is more likely to pull the overall mood down."
+      ),
+    )
+    _render_reason_card(
+      "Largest Discussion Volume",
+      str(largest_volume["topic"]),
+      str(largest_volume["genre"]),
+      (
+        f"This topic has the biggest audience discussion volume with {int(largest_volume['comments_count']):,} matched comments, "
+        "so any sentiment change here can affect the dashboard story more strongly."
+      ),
     )
 
-    action_mix_df = (
-      action_df.groupby(["genre", "action"], as_index=False)
-      .size()
-      .rename(columns={"size": "topic_count"})
+  with col2:
+    _render_reason_card(
+      "Strongest Positive Opportunity",
+      str(strongest_positive["topic"]),
+      str(strongest_positive["genre"]),
+      (
+        f"This topic has the best positive audience response in the current view, with positive share "
+        f"{format_pct(strongest_positive['positive_ratio'])} and average sentiment {format_score(strongest_positive['avg_sentiment_score'])}."
+      ),
     )
-
-    fig_action_mix = px.bar(
-      action_mix_df,
-      x="genre",
-      y="topic_count",
-      color="action",
-      barmode="group",
-      template="plotly_dark",
-      title="Action Breakdown by Genre",
+    _render_reason_card(
+      "Widest Video Coverage",
+      str(widest_coverage["topic"]),
+      str(widest_coverage["genre"]),
+      (
+        f"This topic already spans {int(widest_coverage['videos_covered']):,} videos, so it is a strong candidate for broader monitoring or benchmark comparison."
+      ),
     )
-    fig_action_mix.update_layout(
-      xaxis_title="Genre",
-      yaxis_title="Number of Recommended Topics",
-      legend_title="Action Type",
-      height=430,
-    )
-    st.plotly_chart(fig_action_mix, use_container_width=True)
 
   st.markdown("### Top 3 Next Moves")
 
@@ -390,13 +422,3 @@ def render_prescriptive_tab(
 
   for move in top_moves[:3]:
     st.markdown(f"- {move}")
-
-  with st.expander("Pipeline Health (secondary)"):
-    st.write(
-      {
-        "topics_in_current_view": int(working_df["topic"].astype(str).nunique()),
-        "genres_in_current_view": int(working_df["genre"].astype(str).nunique()),
-        "total_comments_in_scope": int(working_df["comments_count"].sum()),
-        "total_videos_in_scope": int(working_df["videos_covered"].sum()),
-      }
-    )
