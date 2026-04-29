@@ -20,6 +20,7 @@ def resolve_keyword_count_column(df: pd.DataFrame) -> str | None:
       return column
   return None
 
+
 def resolve_like_count_column(df: pd.DataFrame) -> str | None:
   candidates = [
     "like_count",
@@ -73,37 +74,38 @@ def _build_daily_sentiment_rollup(filtered_sentiment_daily_trend: pd.DataFrame) 
 
   working = filtered_sentiment_daily_trend.copy()
   working["collection_date"] = pd.to_datetime(working["collection_date"], errors="coerce")
+
   if "comments_count" not in working.columns:
     working["comments_count"] = 0
   if "videos_covered" not in working.columns:
     working["videos_covered"] = 0
+  if "avg_sentiment_score" not in working.columns:
+    working["avg_sentiment_score"] = 0.0
+  if "positive_ratio" not in working.columns:
+    working["positive_ratio"] = 0.0
+  if "negative_ratio" not in working.columns:
+    working["negative_ratio"] = 0.0
 
   for col in ["comments_count", "videos_covered", "avg_sentiment_score", "positive_ratio", "negative_ratio"]:
-    if col in working.columns:
-      working[col] = pd.to_numeric(working[col], errors="coerce").fillna(0)
-
-  def _daily_group(group: pd.DataFrame) -> pd.Series:
-    comments_count = float(group["comments_count"].sum()) if "comments_count" in group.columns else float(len(group))
-    return pd.Series(
-      {
-        "comments_count": comments_count,
-        "videos_covered": float(group["videos_covered"].sum()) if "videos_covered" in group.columns else 0.0,
-        "avg_sentiment_score": _weighted_average(group, "avg_sentiment_score", "comments_count"),
-        "positive_ratio": _weighted_average(group, "positive_ratio", "comments_count"),
-        "negative_ratio": _weighted_average(group, "negative_ratio", "comments_count"),
-      }
-    )
+    working[col] = pd.to_numeric(working[col], errors="coerce").fillna(0)
 
   daily_rollup = (
-    working.groupby("collection_date", as_index=False)
-    .apply(_daily_group, include_groups=False)
+    working.groupby("collection_date")
+    .apply(
+      lambda group: pd.Series(
+        {
+          "comments_count": float(group["comments_count"].sum()),
+          "videos_covered": float(group["videos_covered"].sum()),
+          "avg_sentiment_score": _weighted_average(group, "avg_sentiment_score", "comments_count"),
+          "positive_ratio": _weighted_average(group, "positive_ratio", "comments_count"),
+          "negative_ratio": _weighted_average(group, "negative_ratio", "comments_count"),
+        }
+      )
+    )
     .reset_index()
+    .sort_values("collection_date")
   )
 
-  if "index" in daily_rollup.columns:
-    daily_rollup = daily_rollup.drop(columns=["index"])
-
-  daily_rollup = daily_rollup.sort_values("collection_date")
   daily_rollup["collection_date_label"] = daily_rollup["collection_date"].dt.strftime("%Y-%m-%d")
   return daily_rollup
 
@@ -234,48 +236,56 @@ def _build_topic_engagement_view(
       suffixes=("_summary", "_comments"),
     )
 
-    merged["comments_count"] = merged.get("comments_count", pd.Series(dtype=float))
-    merged["comments_count"] = merged["comments_count"].fillna(
-      merged["matched_comments"] if "matched_comments" in merged.columns else 0
-    ).fillna(0)
+    if "comments_count" not in merged.columns:
+      merged["comments_count"] = 0
+    merged["comments_count"] = pd.to_numeric(merged["comments_count"], errors="coerce").fillna(0)
 
     if "matched_comments" not in merged.columns:
       merged["matched_comments"] = merged["comments_count"]
     else:
-      merged["matched_comments"] = merged["matched_comments"].fillna(merged["comments_count"]).fillna(0)
+      merged["matched_comments"] = pd.to_numeric(merged["matched_comments"], errors="coerce").fillna(0)
+      merged["matched_comments"] = merged["matched_comments"].where(
+        merged["matched_comments"] > 0,
+        merged["comments_count"],
+      )
 
     if "avg_sentiment_score" not in merged.columns:
       merged["avg_sentiment_score"] = 0.0
     else:
       merged["avg_sentiment_score"] = pd.to_numeric(
-        merged["avg_sentiment_score"], errors="coerce"
+        merged["avg_sentiment_score"],
+        errors="coerce",
       ).fillna(0.0)
 
     if "positive_ratio" not in merged.columns:
       merged["positive_ratio"] = 0.0
     else:
       merged["positive_ratio"] = pd.to_numeric(
-        merged["positive_ratio"], errors="coerce"
+        merged["positive_ratio"],
+        errors="coerce",
       ).fillna(0.0)
 
     if "negative_ratio" not in merged.columns:
       merged["negative_ratio"] = 0.0
     else:
       merged["negative_ratio"] = pd.to_numeric(
-        merged["negative_ratio"], errors="coerce"
+        merged["negative_ratio"],
+        errors="coerce",
       ).fillna(0.0)
 
-    like_total_candidates = [
+    total_like_candidates = [
       "total_comment_likes_comments",
       "total_comment_likes_summary",
       "total_comment_likes",
     ]
-    merged["total_comment_likes"] = 0.0
-    for col in like_total_candidates:
-      if col in merged.columns:
-        merged["total_comment_likes"] = merged["total_comment_likes"].fillna(0.0) + pd.to_numeric(
-          merged[col], errors="coerce"
-        ).fillna(0.0)
+    total_like_source = next((col for col in total_like_candidates if col in merged.columns), None)
+    if total_like_source is None:
+      merged["total_comment_likes"] = 0.0
+    else:
+      merged["total_comment_likes"] = pd.to_numeric(
+        merged[total_like_source],
+        errors="coerce",
+      ).fillna(0.0)
 
     avg_like_candidates = [
       "avg_likes_per_comment_comments",
@@ -283,17 +293,13 @@ def _build_topic_engagement_view(
       "avg_comment_likes",
       "avg_likes_per_comment",
     ]
-    avg_like_source = None
-    for col in avg_like_candidates:
-      if col in merged.columns:
-        avg_like_source = col
-        break
-
+    avg_like_source = next((col for col in avg_like_candidates if col in merged.columns), None)
     if avg_like_source is None:
       merged["avg_likes_per_comment"] = 0.0
     else:
       merged["avg_likes_per_comment"] = pd.to_numeric(
-        merged[avg_like_source], errors="coerce"
+        merged[avg_like_source],
+        errors="coerce",
       ).fillna(0.0)
 
     unique_video_candidates = [
@@ -301,22 +307,19 @@ def _build_topic_engagement_view(
       "unique_videos_summary",
       "unique_videos",
     ]
-    unique_video_source = None
-    for col in unique_video_candidates:
-      if col in merged.columns:
-        unique_video_source = col
-        break
-
+    unique_video_source = next((col for col in unique_video_candidates if col in merged.columns), None)
     if unique_video_source is None:
       merged["unique_videos"] = 0
     else:
       merged["unique_videos"] = pd.to_numeric(
-        merged[unique_video_source], errors="coerce"
+        merged[unique_video_source],
+        errors="coerce",
       ).fillna(0)
 
   merged["topic_display"] = merged["topic"].map(_pretty_text)
   merged["genre_display"] = merged["genre"].map(_pretty_text)
   return merged
+
 
 def _build_video_evidence_view(
   filtered_comments: pd.DataFrame,
@@ -377,22 +380,52 @@ def _build_video_evidence_view(
     merged = comment_video_agg.copy()
     merged["comments_count"] = merged["matched_comments"]
     merged["avg_sentiment_score"] = 0.0
+
   elif comment_video_agg.empty:
     merged = video_summary.copy()
     merged["matched_comments"] = merged["comments_count"] if "comments_count" in merged.columns else 0
     merged["total_comment_likes"] = 0.0
     merged["avg_likes_per_comment"] = 0.0
+
   elif merge_keys:
-    merged = video_summary.merge(comment_video_agg, on=merge_keys, how="left", suffixes=("", "_comment"))
+    merged = video_summary.merge(
+      comment_video_agg,
+      on=merge_keys,
+      how="left",
+      suffixes=("", "_comment"),
+    )
+
     if "topic_comment" in merged.columns and "topic" in merged.columns:
       merged["topic"] = merged["topic"].fillna(merged["topic_comment"])
     if "genre_comment" in merged.columns and "genre" in merged.columns:
       merged["genre"] = merged["genre"].fillna(merged["genre_comment"])
     if "channel_title_comment" in merged.columns and "channel_title" in merged.columns:
       merged["channel_title"] = merged["channel_title"].fillna(merged["channel_title_comment"])
-    merged["matched_comments"] = merged["matched_comments"].fillna(merged["comments_count"]).fillna(0)
-    merged["total_comment_likes"] = merged["total_comment_likes"].fillna(0.0)
-    merged["avg_likes_per_comment"] = merged["avg_likes_per_comment"].fillna(0.0)
+
+    merged["matched_comments"] = pd.to_numeric(
+      merged["matched_comments"],
+      errors="coerce",
+    ).fillna(
+      pd.to_numeric(merged["comments_count"], errors="coerce").fillna(0)
+      if "comments_count" in merged.columns else 0
+    )
+
+    if "total_comment_likes" not in merged.columns:
+      merged["total_comment_likes"] = 0.0
+    else:
+      merged["total_comment_likes"] = pd.to_numeric(
+        merged["total_comment_likes"],
+        errors="coerce",
+      ).fillna(0.0)
+
+    if "avg_likes_per_comment" not in merged.columns:
+      merged["avg_likes_per_comment"] = 0.0
+    else:
+      merged["avg_likes_per_comment"] = pd.to_numeric(
+        merged["avg_likes_per_comment"],
+        errors="coerce",
+      ).fillna(0.0)
+
   else:
     merged = video_summary.copy()
     merged["matched_comments"] = merged["comments_count"] if "comments_count" in merged.columns else 0
@@ -412,6 +445,7 @@ def _build_video_evidence_view(
   merged["topic_display"] = merged["topic"].map(_pretty_text)
   merged["genre_display"] = merged["genre"].map(_pretty_text)
   return merged
+
 
 def _render_snapshot_cards(
   filtered_comments: pd.DataFrame,
@@ -468,6 +502,7 @@ def _render_snapshot_cards(
 """,
       unsafe_allow_html=True,
     )
+
 
 def render_descriptive_tab(
   filtered_collection: pd.DataFrame,
@@ -539,7 +574,6 @@ def render_descriptive_tab(
     if not filtered_comments.empty and like_col is not None
     else 0.0
   )
-
   avg_likes_per_comment = _safe_divide(total_comment_likes, float(matched_comments))
 
   k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -736,7 +770,7 @@ def render_descriptive_tab(
       valid_weekdays = [day for day in weekday_order if day in pivot_heatmap.index]
       pivot_heatmap = pivot_heatmap.reindex(valid_weekdays)
       pivot_heatmap = pivot_heatmap.reindex(columns=list(range(24)), fill_value=0)
-      pivot_heatmap.columns = [format_hour_12(hour_value) for hour_value in pivot_heatmap.columns]  # type: ignore
+      pivot_heatmap.columns = [format_hour_12(hour_value) for hour_value in pivot_heatmap.columns]
 
       fig_hour_heatmap = px.imshow(
         pivot_heatmap,
@@ -790,6 +824,16 @@ def render_descriptive_tab(
           y="keyword",
           color="avg_sentiment_score" if "avg_sentiment_score" in positive_words.columns else None,
           orientation="h",
+          hover_name="keyword",
+          hover_data={
+            keyword_count_col: ":,.0f",
+            "avg_sentiment_score": ":.3f" if "avg_sentiment_score" in positive_words.columns else False,
+          },
+          labels={
+            keyword_count_col: "Frequency",
+            "keyword": "Keyword",
+            "avg_sentiment_score": "Average Sentiment",
+          },
           template="plotly_dark",
           title="Positive Driver Words",
           color_continuous_scale="YlGn",
@@ -827,6 +871,16 @@ def render_descriptive_tab(
           y="keyword",
           color="avg_sentiment_score" if "avg_sentiment_score" in negative_words.columns else None,
           orientation="h",
+          hover_name="keyword",
+          hover_data={
+            keyword_count_col: ":,.0f",
+            "avg_sentiment_score": ":.3f" if "avg_sentiment_score" in negative_words.columns else False,
+          },
+          labels={
+            keyword_count_col: "Frequency",
+            "keyword": "Keyword",
+            "avg_sentiment_score": "Average Sentiment",
+          },
           template="plotly_dark",
           title="Negative Driver Words",
           color_continuous_scale="Reds_r",
@@ -866,13 +920,26 @@ def render_descriptive_tab(
           y="video_title_short",
           color="genre_display",
           orientation="h",
+          hover_name="video_title",
           hover_data={
-            "video_title": True,
             "channel_title": True,
-            "matched_comments": True,
-            "total_comment_likes": True,
+            "topic_display": True,
+            "genre_display": True,
+            "matched_comments": ":,.0f",
+            "total_comment_likes": ":,.0f",
+            "avg_likes_per_comment": ":.2f",
+            "avg_sentiment_score": ":.3f",
             "video_title_short": False,
-            "genre_display": False,
+          },
+          labels={
+            "avg_sentiment_score": "Average Sentiment Score",
+            "video_title_short": "Video",
+            "channel_title": "Channel",
+            "topic_display": "Topic",
+            "genre_display": "Genre",
+            "matched_comments": "Matched Comments",
+            "total_comment_likes": "Total Comment Likes",
+            "avg_likes_per_comment": "Average Likes per Comment",
           },
           template="plotly_dark",
           title="Most Engaging Positive Videos",
@@ -906,13 +973,26 @@ def render_descriptive_tab(
           y="video_title_short",
           color="genre_display",
           orientation="h",
+          hover_name="video_title",
           hover_data={
-            "video_title": True,
             "channel_title": True,
-            "matched_comments": True,
-            "total_comment_likes": True,
+            "topic_display": True,
+            "genre_display": True,
+            "matched_comments": ":,.0f",
+            "total_comment_likes": ":,.0f",
+            "avg_likes_per_comment": ":.2f",
+            "avg_sentiment_score": ":.3f",
             "video_title_short": False,
-            "genre_display": False,
+          },
+          labels={
+            "avg_sentiment_score": "Average Sentiment Score",
+            "video_title_short": "Video",
+            "channel_title": "Channel",
+            "topic_display": "Topic",
+            "genre_display": "Genre",
+            "matched_comments": "Matched Comments",
+            "total_comment_likes": "Total Comment Likes",
+            "avg_likes_per_comment": "Average Likes per Comment",
           },
           template="plotly_dark",
           title="Most Engaging Risk Videos",
