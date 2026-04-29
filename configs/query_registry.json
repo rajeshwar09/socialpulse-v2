@@ -1636,5 +1636,61 @@
     "search_results_limit": 30,
     "comments_per_video_limit": 100,
     "lookback_days": 30
+  },
+  {
+    "query_id": "yt-custom-cricket-ipl",
+    "platform": "youtube",
+    "topic": "cricket",
+    "genre": "sports",
+    "query_text": "ipl",
+    "priority": 6,
+    "active": false,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 10,
+    "comments_per_video_limit": 40,
+    "lookback_days": 14
+  },
+  {
+    "query_id": "yt-custom-cricket-ipl_highlights",
+    "platform": "youtube",
+    "topic": "cricket",
+    "genre": "sports",
+    "query_text": "ipl highlights",
+    "priority": 6,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 50,
+    "comments_per_video_limit": 100,
+    "lookback_days": 14
+  },
+  {
+    "query_id": "yt-custom-cricket-ipl_match_review",
+    "platform": "youtube",
+    "topic": "cricket",
+    "genre": "sports",
+    "query_text": "ipl match review",
+    "priority": 6,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 10,
+    "comments_per_video_limit": 40,
+    "lookback_days": 14
+  },
+  {
+    "query_id": "yt-custom-cricket-ipl_post_match_analysis",
+    "platform": "youtube",
+    "topic": "cricket",
+    "genre": "sports",
+    "query_text": "ipl post match analysis",
+    "priority": 6,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 10,
+    "comments_per_video_limit": 40,
+    "lookback_days": 14
   }
 ]
