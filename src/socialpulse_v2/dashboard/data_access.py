@@ -385,38 +385,106 @@ def apply_dashboard_filters(
       ]
 
     if analysis_query and analysis_query.strip():
-      cleaned_query = analysis_query.strip()
+      cleaned_query = analysis_query.strip().lower()
 
-      if matched_topic and matched_genre:
+      direct_mask = _text_mask(
+        filtered_comments,
+        ["query_text", "topic", "genre", "video_title", "channel_title", "comment_text"],
+        cleaned_query,
+      )
+
+      topic_exact_mask = pd.Series([False] * len(filtered_comments), index=filtered_comments.index)
+      genre_exact_mask = pd.Series([False] * len(filtered_comments), index=filtered_comments.index)
+
+      if "topic" in filtered_comments.columns:
+        topic_exact_mask = filtered_comments["topic"].fillna("").astype(str).str.lower().eq(cleaned_query)
+
+      if "genre" in filtered_comments.columns:
+        genre_exact_mask = filtered_comments["genre"].fillna("").astype(str).str.lower().eq(cleaned_query)
+
+      strict_comment_mask = direct_mask | topic_exact_mask | genre_exact_mask
+
+      if strict_comment_mask.any():
+        filtered_comments = filtered_comments[strict_comment_mask]
+
+        if not filtered_collection.empty:
+          collection_mask = pd.Series([False] * len(filtered_collection), index=filtered_collection.index)
+
+          if "topic" in filtered_collection.columns:
+            collection_mask = collection_mask | filtered_collection["topic"].fillna("").astype(str).str.lower().eq(cleaned_query)
+
+          if "genre" in filtered_collection.columns:
+            collection_mask = collection_mask | filtered_collection["genre"].fillna("").astype(str).str.lower().eq(cleaned_query)
+
+          if "query_text" in filtered_collection.columns:
+            collection_mask = collection_mask | (
+              filtered_collection["query_text"]
+              .fillna("")
+              .astype(str)
+              .str.lower()
+              .str.contains(cleaned_query, regex=False)
+            )
+
+          filtered_collection = filtered_collection[collection_mask]
+
+        if not filtered_query.empty:
+          query_mask = pd.Series([False] * len(filtered_query), index=filtered_query.index)
+
+          if "topic" in filtered_query.columns:
+            query_mask = query_mask | filtered_query["topic"].fillna("").astype(str).str.lower().eq(cleaned_query)
+
+          if "genre" in filtered_query.columns:
+            query_mask = query_mask | filtered_query["genre"].fillna("").astype(str).str.lower().eq(cleaned_query)
+
+          if "query_text" in filtered_query.columns:
+            query_mask = query_mask | (
+              filtered_query["query_text"]
+              .fillna("")
+              .astype(str)
+              .str.lower()
+              .str.contains(cleaned_query, regex=False)
+            )
+
+          filtered_query = filtered_query[query_mask]
+
+      elif matched_topic and matched_genre:
         topic_mask = pd.Series([False] * len(filtered_comments), index=filtered_comments.index)
         genre_mask = pd.Series([False] * len(filtered_comments), index=filtered_comments.index)
 
         if "topic" in filtered_comments.columns:
-          topic_mask = filtered_comments["topic"].astype(str) == str(matched_topic)
+          topic_mask = filtered_comments["topic"].fillna("").astype(str).str.lower().eq(str(matched_topic).lower())
+
         if "genre" in filtered_comments.columns:
-          genre_mask = filtered_comments["genre"].astype(str) == str(matched_genre)
+          genre_mask = filtered_comments["genre"].fillna("").astype(str).str.lower().eq(str(matched_genre).lower())
 
         filtered_comments = filtered_comments[topic_mask | genre_mask]
 
-        if "topic" in filtered_collection.columns and "genre" in filtered_collection.columns:
-          filtered_collection = filtered_collection[
-            (filtered_collection["topic"].astype(str) == str(matched_topic))
-            | (filtered_collection["genre"].astype(str) == str(matched_genre))
-          ]
+        if not filtered_collection.empty:
+          collection_mask = pd.Series([False] * len(filtered_collection), index=filtered_collection.index)
 
-        if "topic" in filtered_query.columns and "genre" in filtered_query.columns:
-          filtered_query = filtered_query[
-            (filtered_query["topic"].astype(str) == str(matched_topic))
-            | (filtered_query["genre"].astype(str) == str(matched_genre))
-          ]
+          if "topic" in filtered_collection.columns:
+            collection_mask = collection_mask | filtered_collection["topic"].fillna("").astype(str).str.lower().eq(str(matched_topic).lower())
+
+          if "genre" in filtered_collection.columns:
+            collection_mask = collection_mask | filtered_collection["genre"].fillna("").astype(str).str.lower().eq(str(matched_genre).lower())
+
+          filtered_collection = filtered_collection[collection_mask]
+
+        if not filtered_query.empty:
+          query_mask = pd.Series([False] * len(filtered_query), index=filtered_query.index)
+
+          if "topic" in filtered_query.columns:
+            query_mask = query_mask | filtered_query["topic"].fillna("").astype(str).str.lower().eq(str(matched_topic).lower())
+
+          if "genre" in filtered_query.columns:
+            query_mask = query_mask | filtered_query["genre"].fillna("").astype(str).str.lower().eq(str(matched_genre).lower())
+
+          filtered_query = filtered_query[query_mask]
 
       else:
-        direct_mask = _text_mask(
-          filtered_comments,
-          ["query_text", "topic", "genre", "video_title", "channel_title", "comment_text"],
-          cleaned_query,
-        )
-        filtered_comments = filtered_comments[direct_mask]
+        filtered_comments = filtered_comments.iloc[0:0]
+        filtered_collection = filtered_collection.iloc[0:0]
+        filtered_query = filtered_query.iloc[0:0]
 
   if comments_df is None:
     return filtered_collection, filtered_query

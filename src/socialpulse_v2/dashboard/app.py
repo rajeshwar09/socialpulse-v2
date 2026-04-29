@@ -284,7 +284,7 @@ def main() -> None:
 
   if analysis_query.strip() and matched_topic and matched_genre:
     st.info(
-      f"Typed keyword '{analysis_query.strip()}' is being mapped to topic '{pretty_text(matched_topic)}' under genre '{pretty_text(matched_genre)}'. The charts below combine the typed keyword view with the matched topic/genre context."
+      f"Typed keyword '{analysis_query.strip()}' is first filtered strictly. If no direct matches are found, the dashboard falls back to topic '{pretty_text(matched_topic)}' under genre '{pretty_text(matched_genre)}'."
     )
 
   filtered_collection, filtered_query, filtered_sentiment_comments = apply_dashboard_filters(

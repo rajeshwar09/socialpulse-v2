@@ -206,6 +206,106 @@ def _aggregate_forecast(forecast_df: pd.DataFrame) -> pd.DataFrame:
   return out
 
 
+def _build_genre_forecast_summary(
+  filtered_sentiment_comments: pd.DataFrame,
+  filtered_forecast_df: pd.DataFrame,
+) -> pd.DataFrame:
+  columns = [
+    "genre",
+    "current_comments",
+    "current_sentiment",
+    "forecast_comments",
+    "forecast_sentiment",
+    "comments_change_pct",
+    "sentiment_change",
+  ]
+
+  if filtered_sentiment_comments.empty:
+    return pd.DataFrame(columns=columns)
+
+  current_df = filtered_sentiment_comments.copy()
+  if "comment_id" not in current_df.columns:
+    current_df["comment_id"] = range(len(current_df))
+  if "genre" not in current_df.columns:
+    current_df["genre"] = "unknown"
+  if "sentiment_score" not in current_df.columns:
+    current_df["sentiment_score"] = 0.0
+
+  current_summary = (
+    current_df.groupby("genre", as_index=False)
+    .agg(
+      current_comments=("comment_id", "nunique"),
+      current_sentiment=("sentiment_score", "mean"),
+    )
+  )
+
+  if filtered_forecast_df.empty:
+    out = current_summary.copy()
+    out["forecast_comments"] = np.nan
+    out["forecast_sentiment"] = np.nan
+    out["comments_change_pct"] = np.nan
+    out["sentiment_change"] = np.nan
+    return out[columns]
+
+  forecast_df = filtered_forecast_df.copy()
+  if "genre" not in forecast_df.columns:
+    forecast_df["genre"] = "unknown"
+
+  forecast_summary = (
+    forecast_df.groupby("genre", as_index=False)
+    .agg(
+      forecast_comments=("forecast_comment_count", "mean"),
+      forecast_sentiment=("forecast_sentiment_score", "mean"),
+    )
+  )
+
+  out = current_summary.merge(forecast_summary, on="genre", how="left")
+
+  out["current_comments"] = pd.to_numeric(out["current_comments"], errors="coerce")
+  out["current_sentiment"] = pd.to_numeric(out["current_sentiment"], errors="coerce")
+  out["forecast_comments"] = pd.to_numeric(out["forecast_comments"], errors="coerce")
+  out["forecast_sentiment"] = pd.to_numeric(out["forecast_sentiment"], errors="coerce")
+
+  out["comments_change_pct"] = np.where(
+    out["current_comments"].notna() & out["forecast_comments"].notna() & (out["current_comments"] > 0),
+    ((out["forecast_comments"] - out["current_comments"]) / out["current_comments"]) * 100.0,
+    np.nan,
+  )
+  out["sentiment_change"] = np.where(
+    out["current_sentiment"].notna() & out["forecast_sentiment"].notna(),
+    out["forecast_sentiment"] - out["current_sentiment"],
+    np.nan,
+  )
+
+  return out[columns].sort_values(["forecast_comments", "current_comments"], ascending=[False, False])
+
+
+def _direction_text(value: float, threshold: float) -> str:
+  if pd.isna(value):
+    return "not enough forecast evidence"
+  if value > threshold:
+    return "rising"
+  if value < -threshold:
+    return "falling"
+  return "stable"
+
+
+def _genre_display(value: object) -> str:
+  return str(value).replace("_", " ").title()
+
+
+def _format_optional_number(value: float | int | None, formatter: Callable[[float | int], str]) -> str:
+  if value is None or pd.isna(value):
+    return "Not enough forecast evidence"
+  return formatter(value)
+
+
+def _format_optional_score(value: float | int | None, formatter: Callable[[float | int], str]) -> str:
+  if value is None or pd.isna(value):
+    return "Not enough forecast evidence"
+  return formatter(value)
+
+
 def render_predictive_tab(
   filtered_sentiment_daily_trend: pd.DataFrame,
   filtered_sentiment_comments: pd.DataFrame,
@@ -240,19 +340,22 @@ def render_predictive_tab(
 
   latest_comments = int(history_df.iloc[-1]["comments_count"]) if not history_df.empty else 0
   latest_sentiment = float(history_df.iloc[-1]["avg_sentiment_score"]) if not history_df.empty else 0.0
+
   forecast_comments_mean = (
     float(aggregated_forecast_df["forecast_comment_count"].mean())
-    if not aggregated_forecast_df.empty else 0.0
+    if not aggregated_forecast_df.empty else np.nan
   )
   forecast_sentiment_mean = (
     float(aggregated_forecast_df["forecast_sentiment_score"].mean())
-    if not aggregated_forecast_df.empty else 0.0
+    if not aggregated_forecast_df.empty else np.nan
   )
 
   forecast_ready_topics = 0
   model_name = "local_damped_trend"
+
   if not filtered_summary_df.empty and "is_forecast_eligible" in filtered_summary_df.columns:
     forecast_ready_topics = int(filtered_summary_df["is_forecast_eligible"].fillna(False).sum())
+
   if not filtered_forecast_df.empty and "model_name" in filtered_forecast_df.columns:
     non_null_models = filtered_forecast_df["model_name"].dropna()
     if not non_null_models.empty:
@@ -264,12 +367,42 @@ def render_predictive_tab(
 
   c1, c2, c3, c4, c5 = st.columns(5)
   c1.metric("Latest Daily Comments", format_number(latest_comments))
-  c2.metric("7-Day Forecast Mean", format_number(round(forecast_comments_mean)))
+  c2.metric(
+    "7-Day Forecast Mean",
+    _format_optional_number(round(forecast_comments_mean) if not pd.isna(forecast_comments_mean) else np.nan, format_number),
+  )
   c3.metric("Latest Sentiment", format_score(latest_sentiment))
-  c4.metric("Forecast Sentiment Mean", format_score(forecast_sentiment_mean))
+  c4.metric(
+    "Forecast Sentiment Mean",
+    _format_optional_score(forecast_sentiment_mean, format_score),
+  )
   c5.metric("Forecast-Ready Topics", format_number(forecast_ready_topics))
 
   st.caption(f"Predictive model in use: {model_name}")
+
+  volume_delta = (
+    forecast_comments_mean - latest_comments
+    if not pd.isna(forecast_comments_mean) else np.nan
+  )
+  sentiment_delta = (
+    forecast_sentiment_mean - latest_sentiment
+    if not pd.isna(forecast_sentiment_mean) else np.nan
+  )
+
+  overall_volume_direction = _direction_text(volume_delta, threshold=5.0)
+  overall_sentiment_direction = _direction_text(sentiment_delta, threshold=0.03)
+
+  st.markdown("### Overall Forecast Interpretation")
+  st.markdown(
+    f"""
+<div style="padding:12px 14px; border:1px solid rgba(255,255,255,0.08); border-radius:12px; margin-bottom:10px; background:rgba(255,255,255,0.02);">
+  <b>Overall attention outlook:</b> {overall_volume_direction.title()}<br/>
+  <b>Overall sentiment outlook:</b> {overall_sentiment_direction.title()}<br/>
+  <b>Interpretation:</b> The current filtered view suggests that audience attention is <b>{overall_volume_direction}</b> and sentiment is <b>{overall_sentiment_direction}</b> over the next 7 days.
+</div>
+""",
+    unsafe_allow_html=True,
+  )
 
   comment_fig = go.Figure()
 
@@ -323,6 +456,18 @@ def render_predictive_tab(
   )
   st.plotly_chart(comment_fig, use_container_width=True)
 
+  st.markdown("### Comment Volume Interpretation")
+  st.markdown(
+    f"""
+<div style="padding:12px 14px; border:1px solid rgba(255,255,255,0.08); border-radius:12px; margin-bottom:10px; background:rgba(255,255,255,0.02);">
+  <b>Latest daily comments:</b> {format_number(latest_comments)}<br/>
+  <b>Forecast average daily comments:</b> {_format_optional_number(round(forecast_comments_mean) if not pd.isna(forecast_comments_mean) else np.nan, format_number)}<br/>
+  <b>Interpretation:</b> Audience attention is expected to remain <b>{overall_volume_direction}</b> in the near-term forecast window.
+</div>
+""",
+    unsafe_allow_html=True,
+  )
+
   sentiment_fig = go.Figure()
 
   if not history_df.empty:
@@ -374,6 +519,18 @@ def render_predictive_tab(
     legend_title="Series",
   )
   st.plotly_chart(sentiment_fig, use_container_width=True)
+
+  st.markdown("### Sentiment Interpretation")
+  st.markdown(
+    f"""
+<div style="padding:12px 14px; border:1px solid rgba(255,255,255,0.08); border-radius:12px; margin-bottom:10px; background:rgba(255,255,255,0.02);">
+  <b>Latest sentiment score:</b> {format_score(latest_sentiment)}<br/>
+  <b>Forecast sentiment score:</b> {_format_optional_score(forecast_sentiment_mean, format_score)}<br/>
+  <b>Interpretation:</b> Sentiment is expected to remain <b>{overall_sentiment_direction}</b> in the near-term forecast window.
+</div>
+""",
+    unsafe_allow_html=True,
+  )
 
   if not filtered_forecast_df.empty:
     forecast_by_topic = (
@@ -436,9 +593,50 @@ def render_predictive_tab(
     )
     right_col.plotly_chart(fig_risk, use_container_width=True)
 
-  if forecast_sentiment_mean > latest_sentiment + 0.03:
-    st.success("Forecast suggests sentiment may improve over the next few days.")
-  elif forecast_sentiment_mean < latest_sentiment - 0.03:
-    st.warning("Forecast suggests sentiment may weaken unless content response improves.")
+  genre_summary_df = _build_genre_forecast_summary(
+    filtered_sentiment_comments=filtered_sentiment_comments,
+    filtered_forecast_df=filtered_forecast_df,
+  )
+
+  genre_forecast_available = not genre_summary_df.empty and genre_summary_df["forecast_sentiment"].notna().any()
+
+  if genre_forecast_available:
+    st.markdown("### Genre-Wise Forecast Interpretation")
+
+    for _, row in genre_summary_df.sort_values(["forecast_comments", "current_comments"], ascending=[False, False]).head(8).iterrows():
+      genre_name = _genre_display(row["genre"])
+
+      volume_direction = _direction_text(row["comments_change_pct"], threshold=10.0)
+      sentiment_direction = _direction_text(row["sentiment_change"], threshold=0.03)
+
+      current_comments_text = _format_optional_number(row["current_comments"], format_number)
+      forecast_comments_text = _format_optional_number(
+        round(row["forecast_comments"]) if not pd.isna(row["forecast_comments"]) else np.nan,
+        format_number,
+      )
+      current_sentiment_text = _format_optional_score(row["current_sentiment"], format_score)
+      forecast_sentiment_text = _format_optional_score(row["forecast_sentiment"], format_score)
+
+      st.markdown(
+        f"""
+<div style="padding:12px 14px; border:1px solid rgba(255,255,255,0.08); border-radius:12px; margin-bottom:10px; background:rgba(255,255,255,0.02);">
+  <b>{genre_name}</b><br/>
+  Current average daily comments: <b>{current_comments_text}</b> → Forecast average daily comments: <b>{forecast_comments_text}</b><br/>
+  Current sentiment: <b>{current_sentiment_text}</b> → Forecast sentiment: <b>{forecast_sentiment_text}</b><br/>
+  <b>Interpretation:</b> Attention is <b>{volume_direction}</b> and sentiment is <b>{sentiment_direction}</b> for this genre in the near-term outlook.
+</div>
+""",
+        unsafe_allow_html=True,
+      )
   else:
-    st.info("Forecast suggests sentiment may remain relatively stable in the near term.")
+    st.info("Genre-level forecast interpretation is not available for this current filter yet. The charts above are showing the overall filtered-view forecast.")
+
+  if not pd.isna(forecast_sentiment_mean):
+    if forecast_sentiment_mean > latest_sentiment + 0.03:
+      st.success("Forecast suggests sentiment may improve over the next few days.")
+    elif forecast_sentiment_mean < latest_sentiment - 0.03:
+      st.warning("Forecast suggests sentiment may weaken unless content response improves.")
+    else:
+      st.info("Forecast suggests sentiment may remain relatively stable in the near term.")
+  else:
+    st.info("Not enough forecast evidence is available yet for a reliable sentiment outlook.")
