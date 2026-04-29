@@ -11,12 +11,16 @@ def _pretty_text(value: object) -> str:
   return str(value).replace("_", " ").title()
 
 
-def _find_negative_keywords(
+def _find_keywords(
   filtered_sentiment_keyword: pd.DataFrame,
   topic: str,
+  polarity: str,
   limit: int = 3,
 ) -> list[str]:
-  if filtered_sentiment_keyword.empty or "topic" not in filtered_sentiment_keyword.columns:
+  if filtered_sentiment_keyword.empty:
+    return []
+
+  if "topic" not in filtered_sentiment_keyword.columns or "keyword" not in filtered_sentiment_keyword.columns:
     return []
 
   keyword_count_col = None
@@ -25,18 +29,26 @@ def _find_negative_keywords(
       keyword_count_col = candidate
       break
 
-  if keyword_count_col is None:
+  if keyword_count_col is None or "avg_sentiment_score" not in filtered_sentiment_keyword.columns:
     return []
 
   subset = filtered_sentiment_keyword[
-    (filtered_sentiment_keyword["topic"].astype(str) == str(topic))
-    & (filtered_sentiment_keyword["avg_sentiment_score"] < 0)
+    filtered_sentiment_keyword["topic"].astype(str) == str(topic)
   ].copy()
 
   if subset.empty:
     return []
 
-  subset = subset.sort_values([keyword_count_col, "avg_sentiment_score"], ascending=[False, True])
+  if polarity == "negative":
+    subset = subset[subset["avg_sentiment_score"] < 0]
+    subset = subset.sort_values([keyword_count_col, "avg_sentiment_score"], ascending=[False, True])
+  else:
+    subset = subset[subset["avg_sentiment_score"] > 0]
+    subset = subset.sort_values([keyword_count_col, "avg_sentiment_score"], ascending=[False, False])
+
+  if subset.empty:
+    return []
+
   return subset["keyword"].astype(str).head(limit).tolist()
 
 
@@ -79,6 +91,60 @@ def _build_topic_summary_from_comments(filtered_sentiment_comments: pd.DataFrame
   return out
 
 
+def _render_metric_chip(label: str, value: str) -> str:
+  return (
+    "<span style=\"display:inline-block; margin:4px 8px 4px 0; padding:6px 10px; "
+    "border:1px solid rgba(255,255,255,0.08); border-radius:999px; "
+    "background:rgba(255,255,255,0.03); font-size:0.92rem;\">"
+    f"<b>{label}:</b> {value}</span>"
+  )
+
+
+def _render_recommendation_card(
+  action_label: str,
+  topic: str,
+  genre: str,
+  comments_count: int,
+  videos_covered: int,
+  avg_sentiment_score: float,
+  positive_ratio: float,
+  negative_ratio: float,
+  driver_words: list[str],
+  action_text: str,
+  priority_score: float,
+) -> None:
+  action_color = "#ff6b6b" if action_label == "Monitor Risk" else "#3ddc97"
+  words_text = ", ".join(driver_words) if driver_words else "No strong driver words found yet"
+
+  chips_html = "".join(
+    [
+      _render_metric_chip("Comments", f"{comments_count:,}"),
+      _render_metric_chip("Videos", f"{videos_covered:,}"),
+      _render_metric_chip("Avg Sentiment", f"{avg_sentiment_score:.3f}"),
+      _render_metric_chip("Positive Share", f"{positive_ratio * 100:.1f}%"),
+      _render_metric_chip("Negative Share", f"{negative_ratio * 100:.1f}%"),
+      _render_metric_chip("Priority Score", f"{priority_score:.3f}"),
+    ]
+  )
+
+  st.markdown(
+    f"""
+<div style="padding:14px 16px; border:1px solid rgba(255,255,255,0.08); border-radius:14px; margin-bottom:12px; background:rgba(255,255,255,0.02);">
+  <div style="display:inline-block; margin-bottom:10px; padding:5px 10px; border-radius:999px; background:{action_color}; color:#06111f; font-weight:700; font-size:0.9rem;">
+    {action_label}
+  </div>
+  <div style="font-size:1.08rem; font-weight:700; margin-bottom:8px;">
+    {_pretty_text(topic)} <span style="opacity:0.8; font-weight:500;">· {_pretty_text(genre)}</span>
+  </div>
+  <div style="margin-bottom:8px;">{chips_html}</div>
+  <div style="margin-bottom:6px;"><b>Why this topic:</b> Driver words suggest audience reaction is linked to: {words_text}</div>
+  <div><b>Recommended action:</b> {action_text}</div>
+</div>
+""",
+    unsafe_allow_html=True,
+  )
+
+
 def render_prescriptive_tab(
   filtered_sentiment_topic_summary: pd.DataFrame,
   filtered_sentiment_keyword: pd.DataFrame,
@@ -89,7 +155,7 @@ def render_prescriptive_tab(
 ) -> None:
   st.subheader("Prescriptive Analytics")
   st.caption(
-    "These recommendations are based on comment sentiment patterns and topic-level audience response."
+    "This page turns audience sentiment patterns into action suggestions, so you can quickly see what to monitor, what to expand, and why each recommendation matters."
   )
 
   working_df = (
@@ -104,67 +170,154 @@ def render_prescriptive_tab(
 
   if "comments_count" not in working_df.columns:
     working_df["comments_count"] = 0
+  if "videos_covered" not in working_df.columns:
+    working_df["videos_covered"] = 0
   if "avg_sentiment_score" not in working_df.columns:
     working_df["avg_sentiment_score"] = 0.0
   if "positive_ratio" not in working_df.columns:
     working_df["positive_ratio"] = 0.0
   if "negative_ratio" not in working_df.columns:
     working_df["negative_ratio"] = 0.0
+  if "topic" not in working_df.columns:
+    working_df["topic"] = "unknown"
+  if "genre" not in working_df.columns:
+    working_df["genre"] = "unknown"
 
   total_comments = max(float(working_df["comments_count"].sum()), 1.0)
+  total_videos = max(float(working_df["videos_covered"].sum()), 1.0)
+
   working_df["volume_share"] = working_df["comments_count"] / total_comments
+  working_df["video_share"] = working_df["videos_covered"] / total_videos
   working_df["sentiment_risk"] = (1 - working_df["avg_sentiment_score"].clip(-1, 1)) / 2
+  working_df["sentiment_strength"] = (working_df["avg_sentiment_score"].clip(-1, 1) + 1) / 2
+
   working_df["monitoring_priority"] = (
-    0.50 * working_df["negative_ratio"]
-    + 0.30 * working_df["sentiment_risk"]
+    0.45 * working_df["negative_ratio"]
+    + 0.25 * working_df["sentiment_risk"]
     + 0.20 * working_df["volume_share"]
+    + 0.10 * (1 - working_df["positive_ratio"])
+  )
+
+  working_df["growth_priority"] = (
+    0.40 * working_df["positive_ratio"]
+    + 0.25 * working_df["sentiment_strength"]
+    + 0.20 * working_df["volume_share"]
+    + 0.15 * working_df["video_share"]
   )
 
   ranked_risk = working_df.sort_values(
     ["monitoring_priority", "comments_count"],
     ascending=[False, False],
-  )
+  ).copy()
 
   ranked_growth = working_df.sort_values(
-    ["positive_ratio", "avg_sentiment_score", "comments_count"],
-    ascending=[False, False, False],
-  )
+    ["growth_priority", "comments_count"],
+    ascending=[False, False],
+  ).copy()
 
-  recommendations: list[str] = []
-  action_rows: list[dict[str, str]] = []
+  risk_rows = ranked_risk.head(3).copy()
+  growth_rows = ranked_growth.head(3).copy()
 
-  for _, row in ranked_risk.head(3).iterrows():
-    topic = _pretty_text(row["topic"])
-    genre = _pretty_text(row["genre"])
-    negative_keywords = _find_negative_keywords(filtered_sentiment_keyword, str(row["topic"]))
-    keyword_text = f" Frequent negative words include: {', '.join(negative_keywords)}." if negative_keywords else ""
+  risk_topic = _pretty_text(risk_rows.iloc[0]["topic"]) if not risk_rows.empty else "N/A"
+  growth_topic = _pretty_text(growth_rows.iloc[0]["topic"]) if not growth_rows.empty else "N/A"
+  risk_genre = _pretty_text(risk_rows.iloc[0]["genre"]) if not risk_rows.empty else "N/A"
+  growth_genre = _pretty_text(growth_rows.iloc[0]["genre"]) if not growth_rows.empty else "N/A"
 
-    recommendations.append(
-      f"Monitor Risk — Topic '{topic}' in genre '{genre}' needs close tracking. Negative share is {format_pct(row['negative_ratio'])} and average sentiment is {format_score(row['avg_sentiment_score'])}.{keyword_text}"
-    )
-    action_rows.append({"action": "Monitor", "topic": topic})
-
-  for _, row in ranked_growth.head(3).iterrows():
-    topic = _pretty_text(row["topic"])
-    genre = _pretty_text(row["genre"])
-
-    recommendations.append(
-      f"Growth Opportunity — Topic '{topic}' in genre '{genre}' is performing well. Positive share is {format_pct(row['positive_ratio'])} with average sentiment {format_score(row['avg_sentiment_score'])}. Consider expanding collection in this area."
-    )
-    action_rows.append({"action": "Growth Opportunity", "topic": topic})
-
-  st.markdown("### Recommended Actions")
-  for index, recommendation in enumerate(recommendations, start=1):
-    st.markdown(
-      f"""
-<div style="padding:12px 14px; border:1px solid rgba(255,255,255,0.08); border-radius:12px; margin-bottom:10px; background:rgba(255,255,255,0.02);">
-  <b>Recommendation {index}.</b> {recommendation}
+  st.markdown("### Executive Summary")
+  st.markdown(
+    f"""
+<div style="padding:14px 16px; border:1px solid rgba(255,255,255,0.08); border-radius:14px; margin-bottom:14px; background:rgba(255,255,255,0.02);">
+  The current filtered audience view shows <b>{len(risk_rows)}</b> topics that need close monitoring and <b>{len(growth_rows)}</b> topics that look suitable for expansion. 
+  The strongest immediate risk is <b>{risk_topic}</b> in <b>{risk_genre}</b>, while the strongest growth opportunity is <b>{growth_topic}</b> in <b>{growth_genre}</b>.
 </div>
 """,
-      unsafe_allow_html=True,
+    unsafe_allow_html=True,
+  )
+
+  k1, k2, k3, k4 = st.columns(4)
+  k1.metric("Topics to Monitor", f"{len(risk_rows)}")
+  k2.metric("Growth Opportunities", f"{len(growth_rows)}")
+  k3.metric("Top Risk Topic", risk_topic)
+  k4.metric("Top Opportunity Topic", growth_topic)
+
+  st.markdown("### Recommended Actions")
+
+  action_rows: list[dict[str, str | float]] = []
+
+  for _, row in risk_rows.iterrows():
+    topic = str(row["topic"])
+    genre = str(row["genre"])
+    negative_words = _find_keywords(filtered_sentiment_keyword, topic, polarity="negative", limit=3)
+
+    action_text = (
+      f"Track this topic more closely, review recent videos and comments, and investigate the negative driver words before expanding coverage."
+    )
+
+    _render_recommendation_card(
+      action_label="Monitor Risk",
+      topic=topic,
+      genre=genre,
+      comments_count=int(row["comments_count"]),
+      videos_covered=int(row["videos_covered"]),
+      avg_sentiment_score=float(row["avg_sentiment_score"]),
+      positive_ratio=float(row["positive_ratio"]),
+      negative_ratio=float(row["negative_ratio"]),
+      driver_words=negative_words,
+      action_text=action_text,
+      priority_score=float(row["monitoring_priority"]),
+    )
+
+    action_rows.append(
+      {
+        "action": "Monitor Risk",
+        "topic": _pretty_text(topic),
+        "genre": _pretty_text(genre),
+        "priority_score": float(row["monitoring_priority"]),
+      }
+    )
+
+  for _, row in growth_rows.iterrows():
+    topic = str(row["topic"])
+    genre = str(row["genre"])
+    positive_words = _find_keywords(filtered_sentiment_keyword, topic, polarity="positive", limit=3)
+
+    driver_text = (
+      f"Positive driver words suggest this topic is connecting well with viewers."
+      if positive_words else
+      "Audience response is positive enough to justify more collection or deeper monitoring."
+    )
+
+    action_text = (
+      f"Consider expanding collection in this area, increase query coverage, and use this topic as a benchmark for stronger audience response."
+    )
+
+    _render_recommendation_card(
+      action_label="Growth Opportunity",
+      topic=topic,
+      genre=genre,
+      comments_count=int(row["comments_count"]),
+      videos_covered=int(row["videos_covered"]),
+      avg_sentiment_score=float(row["avg_sentiment_score"]),
+      positive_ratio=float(row["positive_ratio"]),
+      negative_ratio=float(row["negative_ratio"]),
+      driver_words=positive_words,
+      action_text=f"{driver_text} {action_text}",
+      priority_score=float(row["growth_priority"]),
+    )
+
+    action_rows.append(
+      {
+        "action": "Growth Opportunity",
+        "topic": _pretty_text(topic),
+        "genre": _pretty_text(genre),
+        "priority_score": float(row["growth_priority"]),
+      }
     )
 
   st.markdown("### Monitoring Priority by Topic")
+  st.caption(
+    "Higher priority score means the topic combines weaker sentiment, stronger negative share, and enough discussion volume to influence the overall audience mood more heavily."
+  )
 
   priority_df = ranked_risk.head(10).copy()
   priority_df["topic_display"] = priority_df["topic"].map(_pretty_text)
@@ -183,23 +336,67 @@ def render_prescriptive_tab(
     xaxis_title="Priority Score",
     yaxis_title="Topic",
     legend_title="Genre",
-    height=480,
+    height=500,
     yaxis={"categoryorder": "total ascending"},
   )
   st.plotly_chart(fig_priority, use_container_width=True)
 
   if action_rows:
-    st.markdown("### Recommended Action Mix")
-
     action_df = pd.DataFrame(action_rows)
-    mix_df = action_df.groupby("action", as_index=False).size().rename(columns={"size": "count"})
 
-    fig_mix = px.pie(
-      mix_df,
-      values="count",
-      names="action",
-      template="plotly_dark",
-      title="Recommended Action Mix",
+    st.markdown("### Action Breakdown by Genre")
+    st.caption(
+      "This chart shows how many action recommendations fall under each genre, split into monitoring needs and growth opportunities."
     )
-    fig_mix.update_layout(height=420)
-    st.plotly_chart(fig_mix, use_container_width=True)
+
+    action_mix_df = (
+      action_df.groupby(["genre", "action"], as_index=False)
+      .size()
+      .rename(columns={"size": "topic_count"})
+    )
+
+    fig_action_mix = px.bar(
+      action_mix_df,
+      x="genre",
+      y="topic_count",
+      color="action",
+      barmode="group",
+      template="plotly_dark",
+      title="Action Breakdown by Genre",
+    )
+    fig_action_mix.update_layout(
+      xaxis_title="Genre",
+      yaxis_title="Number of Recommended Topics",
+      legend_title="Action Type",
+      height=430,
+    )
+    st.plotly_chart(fig_action_mix, use_container_width=True)
+
+  st.markdown("### Top 3 Next Moves")
+
+  top_moves: list[str] = []
+  if not risk_rows.empty:
+    top_moves.append(
+      f"Review the audience reaction for **{_pretty_text(risk_rows.iloc[0]['topic'])}** in **{_pretty_text(risk_rows.iloc[0]['genre'])}** first, because it currently has the highest monitoring priority."
+    )
+  if len(growth_rows) > 0:
+    top_moves.append(
+      f"Expand query coverage around **{_pretty_text(growth_rows.iloc[0]['topic'])}** in **{_pretty_text(growth_rows.iloc[0]['genre'])}**, because it is the strongest opportunity in the current view."
+    )
+  if not filtered_sentiment_keyword.empty:
+    top_moves.append(
+      "Use the driver words shown in the recommendation cards to explain *why* sentiment is weak or strong, instead of relying only on the raw score."
+    )
+
+  for move in top_moves[:3]:
+    st.markdown(f"- {move}")
+
+  with st.expander("Pipeline Health (secondary)"):
+    st.write(
+      {
+        "topics_in_current_view": int(working_df["topic"].astype(str).nunique()),
+        "genres_in_current_view": int(working_df["genre"].astype(str).nunique()),
+        "total_comments_in_scope": int(working_df["comments_count"].sum()),
+        "total_videos_in_scope": int(working_df["videos_covered"].sum()),
+      }
+    )
