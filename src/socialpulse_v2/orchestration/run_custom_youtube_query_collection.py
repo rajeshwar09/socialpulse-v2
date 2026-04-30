@@ -12,7 +12,9 @@ from rich.table import Table
 from socialpulse_v2.config.query_registry import QueryDefinition, upsert_custom_query
 from socialpulse_v2.core.logging import configure_logging
 from socialpulse_v2.core.settings import settings
-from socialpulse_v2.orchestration.run_bronze_daily_ingestion import main as bronze_main
+from socialpulse_v2.orchestration.run_bronze_mongo_ingestion import (
+  main as mongo_bronze_main,
+)
 from socialpulse_v2.orchestration.run_dashboard_daily_overview import main as dashboard_overview_main
 from socialpulse_v2.orchestration.run_gold_daily_overview import main as daily_overview_main
 from socialpulse_v2.orchestration.run_gold_youtube_comments_predictive import main as predictive_gold_main
@@ -23,6 +25,9 @@ from socialpulse_v2.orchestration.run_gold_youtube_sentiment_descriptive import 
 from socialpulse_v2.orchestration.run_silver_youtube_comments import main as silver_comments_main
 from socialpulse_v2.orchestration.run_silver_youtube_comments_sentiment import (
   main as silver_sentiment_main,
+)
+from socialpulse_v2.pipelines.raw.backfill_youtube_raw_to_mongo import (
+  run_youtube_raw_backfill_to_mongo,
 )
 from socialpulse_v2.pipelines.raw.daily_youtube_collection import run_daily_youtube_collection
 
@@ -67,6 +72,16 @@ def build_custom_plan_payload(query: QueryDefinition) -> dict[str, Any]:
     "selected_queries": [selected_row],
     "deferred_queries": [],
   }
+
+
+def _run_dashboard_marts_refresh() -> None:
+  silver_comments_main()
+  silver_sentiment_main()
+  sentiment_gold_main()
+  sentiment_descriptive_gold_main()
+  predictive_gold_main()
+  daily_overview_main()
+  dashboard_overview_main()
 
 
 def run_custom_youtube_query_pipeline(
@@ -114,14 +129,19 @@ def run_custom_youtube_query_pipeline(
     lookback_days=definition.lookback_days,
   )
 
-  bronze_main()
-  silver_comments_main()
-  silver_sentiment_main()
-  sentiment_gold_main()
-  sentiment_descriptive_gold_main()
-  predictive_gold_main()
-  daily_overview_main()
-  dashboard_overview_main()
+  latest_run_dir = Path("data/raw/youtube/daily") / str(manifest["run_id"])
+  latest_manifest_path = latest_run_dir / "manifest.json"
+
+  mongo_backfill_summary = run_youtube_raw_backfill_to_mongo(
+    daily_root=latest_run_dir.parent,
+    dump_files=[],
+    dry_run=False,
+    limit_runs=None,
+    limit_records=None,
+  )
+
+  mongo_bronze_main()
+  _run_dashboard_marts_refresh()
 
   return {
     "registry_action": action,
@@ -132,9 +152,13 @@ def run_custom_youtube_query_pipeline(
     "active": definition.active,
     "custom_plan_path": str(custom_plan_path),
     "run_id": manifest["run_id"],
+    "manifest_path": str(latest_manifest_path),
     "queries_executed": manifest["queries_executed"],
     "total_comments_collected": manifest["total_comments_collected"],
     "error_count": manifest["error_count"],
+    "mongo_documents_prepared": mongo_backfill_summary["total_documents_prepared"],
+    "mongo_documents_upserted": mongo_backfill_summary["total_upserted_documents"],
+    "mongo_documents_matched": mongo_backfill_summary["total_matched_documents"],
   }
 
 
@@ -178,12 +202,16 @@ def main() -> None:
   table.add_row("Add To Daily Registry", str(result["active"]))
   table.add_row("Custom Plan Path", result["custom_plan_path"])
   table.add_row("Run ID", result["run_id"])
+  table.add_row("Manifest Path", result["manifest_path"])
   table.add_row("Queries Executed", str(result["queries_executed"]))
   table.add_row("Total Comments Collected", str(result["total_comments_collected"]))
+  table.add_row("Mongo Documents Prepared", str(result["mongo_documents_prepared"]))
+  table.add_row("Mongo Documents Upserted", str(result["mongo_documents_upserted"]))
+  table.add_row("Mongo Documents Matched", str(result["mongo_documents_matched"]))
   table.add_row("Error Count", str(result["error_count"]))
 
   console.print(table)
-  console.print("[bold green]Custom query collection and refresh completed successfully.[/bold green]")
+  console.print("[bold green]Custom query collection, MongoDB ingestion, and dashboard refresh completed successfully.[/bold green]")
 
 
 if __name__ == "__main__":
