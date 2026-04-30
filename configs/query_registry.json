@@ -770,53 +770,11 @@
     "lookback_days": 30
   },
   {
-    "query_id": "yt-football-boost-11",
-    "platform": "youtube",
-    "topic": "football",
-    "genre": "sports",
-    "query_text": "football match analysis 2026",
-    "priority": 8,
-    "active": true,
-    "cadence": "daily",
-    "expected_units": 140,
-    "search_results_limit": 30,
-    "comments_per_video_limit": 60,
-    "lookback_days": 30
-  },
-  {
-    "query_id": "yt-football-wave-330",
-    "platform": "youtube",
-    "topic": "football",
-    "genre": "sports",
-    "query_text": "football match reaction review 2026",
-    "priority": 8,
-    "active": true,
-    "cadence": "daily",
-    "expected_units": 140,
-    "search_results_limit": 30,
-    "comments_per_video_limit": 60,
-    "lookback_days": 30
-  },
-  {
     "query_id": "yt-football-wave-331",
     "platform": "youtube",
     "topic": "football",
     "genre": "sports",
     "query_text": "premier league review 2026",
-    "priority": 8,
-    "active": true,
-    "cadence": "daily",
-    "expected_units": 140,
-    "search_results_limit": 30,
-    "comments_per_video_limit": 60,
-    "lookback_days": 30
-  },
-  {
-    "query_id": "yt-football-wave-332",
-    "platform": "youtube",
-    "topic": "football",
-    "genre": "sports",
-    "query_text": "football tactics analysis review",
     "priority": 8,
     "active": true,
     "cadence": "daily",
@@ -1512,20 +1470,6 @@
     "lookback_days": 30
   },
   {
-    "query_id": "yt-football-analysis-01",
-    "platform": "youtube",
-    "topic": "football",
-    "genre": "sports",
-    "query_text": "football match analysis review",
-    "priority": 7,
-    "active": true,
-    "cadence": "daily",
-    "expected_units": 140,
-    "search_results_limit": 30,
-    "comments_per_video_limit": 100,
-    "lookback_days": 30
-  },
-  {
     "query_id": "yt-ai-tools-01",
     "platform": "youtube",
     "topic": "ai_tools",
@@ -1650,6 +1594,20 @@
     "search_results_limit": 30,
     "comments_per_video_limit": 100,
     "lookback_days": 30
+  },
+  {
+    "query_id": "yt-custom-trump-trump",
+    "platform": "youtube",
+    "topic": "trump",
+    "genre": "custom",
+    "query_text": "trump",
+    "priority": 6,
+    "active": false,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 10,
+    "comments_per_video_limit": 40,
+    "lookback_days": 14
   },
   {
     "query_id": "yt-custom-cricket-ipl",
