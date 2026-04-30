@@ -1,5 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree run-gold-youtube-sentiment-all
-
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree run-gold-youtube-sentiment-all mongo-up mongo-init mongo-check mongo-logs mongo-down mongo-reset run-mongo-check run-mongo-backfill-dry-run run-mongo-backfill
 install:
 	pip install -r requirements.txt
 	pip install -e .
@@ -40,6 +39,33 @@ run-kafka-producer:
 run-kafka-consumer:
 	PYTHONPATH=src python -m socialpulse_v2.orchestration.consume_youtube_comments_to_bronze
 
+mongo-up:
+	docker compose -f docker-compose.mongo-sharded.yml up -d
+
+mongo-init:
+	bash scripts/mongo/init_sharded_cluster.sh
+
+mongo-check:
+	bash scripts/mongo/check_mongo_cluster.sh
+
+mongo-logs:
+	docker compose -f docker-compose.mongo-sharded.yml logs -f
+
+mongo-down:
+	docker compose -f docker-compose.mongo-sharded.yml down
+
+mongo-reset:
+	docker compose -f docker-compose.mongo-sharded.yml down -v
+
+run-mongo-check:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.check_mongo_connection
+
+run-mongo-backfill-dry-run:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.backfill_youtube_raw_to_mongo --dry-run
+
+run-mongo-backfill:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.backfill_youtube_raw_to_mongo
+
 run-silver-youtube-comments:
 	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_silver_youtube_comments
 
@@ -70,3 +96,9 @@ run-custom-youtube-query:
 
 tree:
 	find . -maxdepth 4 | sort
+
+run-mongo-bronze-dry-run:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_bronze_mongo_ingestion --dry-run
+
+run-mongo-bronze-ingestion:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_bronze_mongo_ingestion
