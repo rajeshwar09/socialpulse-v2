@@ -96,3 +96,9 @@ run-custom-youtube-query:
 
 tree:
 	find . -maxdepth 4 | sort
+
+run-mongo-bronze-dry-run:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_bronze_mongo_ingestion --dry-run
+
+run-mongo-bronze-ingestion:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_bronze_mongo_ingestion
