@@ -1,0 +1,76 @@
+services:
+  mongo-config01:
+    image: mongo:7.0
+    container_name: socialpulse-mongo-config01
+    command:
+      - mongod
+      - --configsvr
+      - --replSet
+      - configReplSet
+      - --port
+      - "27017"
+      - --bind_ip_all
+    volumes:
+      - socialpulse_mongo_config01:/data/db
+    networks:
+      - socialpulse-mongo-net
+
+  mongo-shard01:
+    image: mongo:7.0
+    container_name: socialpulse-mongo-shard01
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - shard01ReplSet
+      - --port
+      - "27017"
+      - --bind_ip_all
+    volumes:
+      - socialpulse_mongo_shard01:/data/db
+    networks:
+      - socialpulse-mongo-net
+
+  mongo-shard02:
+    image: mongo:7.0
+    container_name: socialpulse-mongo-shard02
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - shard02ReplSet
+      - --port
+      - "27017"
+      - --bind_ip_all
+    volumes:
+      - socialpulse_mongo_shard02:/data/db
+    networks:
+      - socialpulse-mongo-net
+
+  mongo-router:
+    image: mongo:7.0
+    container_name: socialpulse-mongo-router
+    command:
+      - mongos
+      - --configdb
+      - configReplSet/mongo-config01:27017
+      - --bind_ip_all
+      - --port
+      - "27017"
+    depends_on:
+      - mongo-config01
+      - mongo-shard01
+      - mongo-shard02
+    ports:
+      - "27017:27017"
+    networks:
+      - socialpulse-mongo-net
+
+volumes:
+  socialpulse_mongo_config01:
+  socialpulse_mongo_shard01:
+  socialpulse_mongo_shard02:
+
+networks:
+  socialpulse-mongo-net:
+    driver: bridge

@@ -1,5 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree run-gold-youtube-sentiment-all
-
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree run-gold-youtube-sentiment-all mongo-up mongo-init mongo-check mongo-logs mongo-down mongo-reset
 install:
 	pip install -r requirements.txt
 	pip install -e .
@@ -39,6 +38,24 @@ run-kafka-producer:
 
 run-kafka-consumer:
 	PYTHONPATH=src python -m socialpulse_v2.orchestration.consume_youtube_comments_to_bronze
+
+mongo-up:
+	docker compose -f docker-compose.mongo-sharded.yml up -d
+
+mongo-init:
+	bash scripts/mongo/init_sharded_cluster.sh
+
+mongo-check:
+	bash scripts/mongo/check_mongo_cluster.sh
+
+mongo-logs:
+	docker compose -f docker-compose.mongo-sharded.yml logs -f
+
+mongo-down:
+	docker compose -f docker-compose.mongo-sharded.yml down
+
+mongo-reset:
+	docker compose -f docker-compose.mongo-sharded.yml down -v
 
 run-silver-youtube-comments:
 	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_silver_youtube_comments
