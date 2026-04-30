@@ -120,10 +120,13 @@ def upsert_youtube_comment_documents(
   operations: list[UpdateOne] = []
 
   for document in documents:
-    run_id = str(document.get("run_id", ""))
-    query_id = str(document.get("query_id", ""))
-    video_id = str(document.get("video_id", ""))
-    comment_id = str(document.get("comment_id", ""))
+    clean_document = dict(document)
+    clean_document.pop("_id", None)
+
+    run_id = str(clean_document.get("run_id", ""))
+    query_id = str(clean_document.get("query_id", ""))
+    video_id = str(clean_document.get("video_id", ""))
+    comment_id = str(clean_document.get("comment_id", ""))
 
     if not comment_id:
       continue
@@ -137,7 +140,7 @@ def upsert_youtube_comment_documents(
           "comment_id": comment_id,
         },
         {
-          "$set": document,
+          "$set": clean_document,
         },
         upsert=True,
       )
