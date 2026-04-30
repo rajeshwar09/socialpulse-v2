@@ -21,5 +21,18 @@ class AppSettings:
   plan_output_dir: str = os.getenv("SOCIALPULSE_PLAN_OUTPUT_DIR", "data/raw/plans")
   youtube_daily_quota_budget: int = int(os.getenv("YOUTUBE_DAILY_QUOTA_BUDGET", "10000"))
 
+  mongo_uri: str = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+  mongo_database: str = os.getenv("MONGO_DATABASE", "socialpulse")
+  mongo_youtube_comments_collection: str = os.getenv(
+    "MONGO_YOUTUBE_COMMENTS_COLLECTION",
+    "youtube_comments_raw",
+  )
+  mongo_server_selection_timeout_ms: int = int(
+    os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")
+  )
+  mongo_connect_timeout_ms: int = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "5000"))
+  mongo_socket_timeout_ms: int = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "30000"))
+  mongo_batch_size: int = int(os.getenv("MONGO_BATCH_SIZE", "1000"))
+
 
 settings = AppSettings()
