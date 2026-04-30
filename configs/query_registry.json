@@ -1706,5 +1706,19 @@
     "search_results_limit": 10,
     "comments_per_video_limit": 40,
     "lookback_days": 14
+  },
+  {
+    "query_id": "yt-custom-smartphones-budget_smartphone_review",
+    "platform": "youtube",
+    "topic": "smartphones",
+    "genre": "technology",
+    "query_text": "budget smartphone review 2026",
+    "priority": 6,
+    "active": false,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 1,
+    "comments_per_video_limit": 5,
+    "lookback_days": 7
   }
 ]
