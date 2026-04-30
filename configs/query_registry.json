@@ -672,6 +672,34 @@
     "lookback_days": 30
   },
   {
+    "query_id": "yt-custom-elections-india_election_analysis",
+    "platform": "youtube",
+    "topic": "elections",
+    "genre": "politics",
+    "query_text": "india election analysis",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 800,
+    "search_results_limit": 18,
+    "comments_per_video_limit": 70,
+    "lookback_days": 21
+  },
+  {
+    "query_id": "yt-custom-governance-government_policy_debate",
+    "platform": "youtube",
+    "topic": "governance",
+    "genre": "politics",
+    "query_text": "government policy debate india",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 800,
+    "search_results_limit": 18,
+    "comments_per_video_limit": 70,
+    "lookback_days": 21
+  },
+  {
     "query_id": "yt-boxing-wave-334",
     "platform": "youtube",
     "topic": "boxing",
@@ -1454,6 +1482,20 @@
     "search_results_limit": 30,
     "comments_per_video_limit": 100,
     "lookback_days": 30
+  },
+  {
+    "query_id": "yt-custom-political_leaders-modi_rahul_gandhi_politi",
+    "platform": "youtube",
+    "topic": "political_leaders",
+    "genre": "politics",
+    "query_text": "modi rahul gandhi political debate",
+    "priority": 7,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 700,
+    "search_results_limit": 16,
+    "comments_per_video_limit": 65,
+    "lookback_days": 21
   },
   {
     "query_id": "yt-cricket-highlights-01",

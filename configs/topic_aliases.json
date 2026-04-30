@@ -187,5 +187,50 @@
       "loan",
       "loans"
     ]
+  },
+  "politics": {
+    "elections": [
+      "election",
+      "elections",
+      "poll",
+      "polls",
+      "vote",
+      "voting",
+      "campaign",
+      "manifesto",
+      "lok sabha",
+      "assembly election"
+    ],
+    "governance": [
+      "government",
+      "governance",
+      "policy",
+      "policies",
+      "scheme",
+      "schemes",
+      "budget",
+      "parliament",
+      "bill",
+      "law"
+    ],
+    "political_leaders": [
+      "prime minister",
+      "pm",
+      "chief minister",
+      "cm",
+      "minister",
+      "opposition leader",
+      "modi",
+      "rahul gandhi"
+    ],
+    "political_debates": [
+      "debate",
+      "debates",
+      "speech",
+      "rally",
+      "press conference",
+      "parliament debate",
+      "political discussion"
+    ]
   }
 }
