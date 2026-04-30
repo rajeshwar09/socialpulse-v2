@@ -402,57 +402,110 @@ def _build_daily_topic_breakdown(filtered_sentiment_comments: pd.DataFrame) -> p
   return grouped
 
 
-def _build_correlation_matrix(filtered_sentiment_comments: pd.DataFrame) -> pd.DataFrame:
+def _build_sentiment_endorsement_view(filtered_sentiment_comments: pd.DataFrame) -> pd.DataFrame:
+  columns = [
+    "sentiment_bucket",
+    "sentiment_bucket_order",
+    "comments_count",
+    "total_comment_likes",
+    "avg_likes_per_comment",
+    "avg_sentiment_score",
+  ]
+
   if filtered_sentiment_comments.empty:
-    return pd.DataFrame()
+    return pd.DataFrame(columns=columns)
 
   working = filtered_sentiment_comments.copy()
 
-  numeric_candidates = [
-    "sentiment_score",
-    "positive_hits",
-    "negative_hits",
-    "comment_like_count",
-    "like_count",
-    "reply_count",
-    "token_count",
+  if "sentiment_score" not in working.columns:
+    return pd.DataFrame(columns=columns)
+
+  like_col = _resolve_like_count_column(working)
+  if like_col is None:
+    working["__resolved_like_count"] = 0.0
+  else:
+    working["__resolved_like_count"] = pd.to_numeric(
+      working[like_col],
+      errors="coerce",
+    ).fillna(0.0)
+
+  working["sentiment_score"] = pd.to_numeric(
+    working["sentiment_score"],
+    errors="coerce",
+  )
+
+  working = working.dropna(subset=["sentiment_score"]).copy()
+  if working.empty:
+    return pd.DataFrame(columns=columns)
+
+  bins = [-1.01, -0.35, -0.05, 0.05, 0.35, 1.01]
+  labels = [
+    "Very Negative",
+    "Negative",
+    "Neutral",
+    "Positive",
+    "Very Positive",
   ]
 
-  available = [col for col in numeric_candidates if col in working.columns]
-  if not available:
-    return pd.DataFrame()
+  working["sentiment_bucket"] = pd.cut(
+    working["sentiment_score"],
+    bins=bins,
+    labels=labels,
+    include_lowest=True,
+  )
 
-  corr_df = working[available].copy()
-  for col in available:
-    corr_df[col] = pd.to_numeric(corr_df[col], errors="coerce")
+  grouped = (
+    working.groupby("sentiment_bucket", observed=False, as_index=False)
+    .agg(
+      comments_count=("sentiment_bucket", "size"),
+      total_comment_likes=("__resolved_like_count", "sum"),
+      avg_likes_per_comment=("__resolved_like_count", "mean"),
+      avg_sentiment_score=("sentiment_score", "mean"),
+    )
+  )
 
-  valid_cols = []
-  for col in corr_df.columns:
-    non_null = int(corr_df[col].notna().sum())
-    unique_vals = int(corr_df[col].nunique(dropna=True))
-    if non_null >= 2 and unique_vals >= 2:
-      valid_cols.append(col)
+  bucket_order = {label: idx for idx, label in enumerate(labels)}
+  grouped["sentiment_bucket"] = grouped["sentiment_bucket"].astype(str)
+  grouped["sentiment_bucket_order"] = grouped["sentiment_bucket"].map(bucket_order)
+  grouped = grouped.sort_values("sentiment_bucket_order")
 
-  if len(valid_cols) < 2:
-    return pd.DataFrame()
+  return grouped[columns]
 
-  corr_df = corr_df[valid_cols]
-  matrix = corr_df.corr(numeric_only=True)
-  if matrix.empty:
-    return pd.DataFrame()
 
-  rename_map = {
-    "sentiment_score": "Sentiment Score",
-    "positive_hits": "Positive Hits",
-    "negative_hits": "Negative Hits",
-    "comment_like_count": "Comment Likes",
-    "like_count": "Comment Likes",
-    "reply_count": "Reply Count",
-    "token_count": "Token Count",
-  }
+def _build_like_distribution_by_label(filtered_sentiment_comments: pd.DataFrame) -> pd.DataFrame:
+  columns = ["sentiment_label", "resolved_like_count"]
 
-  matrix = matrix.rename(index=rename_map, columns=rename_map)
-  return matrix
+  if filtered_sentiment_comments.empty:
+    return pd.DataFrame(columns=columns)
+
+  working = filtered_sentiment_comments.copy()
+
+  if "sentiment_label" not in working.columns:
+    return pd.DataFrame(columns=columns)
+
+  like_col = _resolve_like_count_column(working)
+  if like_col is None:
+    working["resolved_like_count"] = 0.0
+  else:
+    working["resolved_like_count"] = pd.to_numeric(
+      working[like_col],
+      errors="coerce",
+    ).fillna(0.0)
+
+  working["sentiment_label"] = (
+    working["sentiment_label"]
+    .fillna("neutral")
+    .astype(str)
+    .str.strip()
+    .str.lower()
+  )
+
+  allowed = {"positive", "neutral", "negative"}
+  working = working[working["sentiment_label"].isin(allowed)].copy()
+  if working.empty:
+    return pd.DataFrame(columns=columns)
+
+  return working[columns]
 
 
 def render_diagnostic_tab(
@@ -467,7 +520,7 @@ def render_diagnostic_tab(
 ) -> None:
   st.subheader("Diagnostic Analytics")
   st.caption(
-    "This page explains why sentiment is moving up or down by identifying concentrated risk topics, worst-day drivers, video-level sentiment pressure, keyword-level driver words, and relationships between sentiment and engagement variables."
+    "This page explains why sentiment is moving up or down by identifying concentrated risk topics, worst-day drivers, video-level sentiment pressure, keyword-level driver words, and which kinds of comments are actually getting audience endorsement through likes."
   )
 
   if (
@@ -504,7 +557,8 @@ def render_diagnostic_tab(
   )
 
   daily_topic_breakdown = _build_daily_topic_breakdown(filtered_sentiment_comments)
-  corr_matrix = _build_correlation_matrix(filtered_sentiment_comments)
+  endorsement_view = _build_sentiment_endorsement_view(filtered_sentiment_comments)
+  like_distribution_view = _build_like_distribution_by_label(filtered_sentiment_comments)
 
   st.markdown("### Key Diagnostic Insights")
 
@@ -550,6 +604,15 @@ def render_diagnostic_tab(
         insights.append(
           f"The sharpest one-day sentiment drop happened on **{worst_day_for_breakdown.strftime('%Y-%m-%d')}**, with a change of {format_score(worst_day['delta'])}."
         )
+
+  if not endorsement_view.empty:
+    most_endorsed_bucket = endorsement_view.sort_values(
+      ["avg_likes_per_comment", "total_comment_likes"],
+      ascending=[False, False],
+    ).iloc[0]
+    insights.append(
+      f"The strongest audience endorsement currently comes from **{most_endorsed_bucket['sentiment_bucket']}** comments, with average likes per comment {format_score(most_endorsed_bucket['avg_likes_per_comment'])}."
+    )
 
   for insight in insights:
     st.markdown(f"- {insight}")
@@ -873,28 +936,68 @@ def render_diagnostic_tab(
       )
       st.plotly_chart(fig_positive, use_container_width=True)
 
-  st.markdown("### Metric Relationship Matrix")
+  st.markdown("### Audience Endorsement Diagnostics")
   st.caption(
-    "This chart shows which sentiment and engagement variables tend to move together in the current filtered view. It indicates relationships, not direct cause."
+    "These visuals show which kinds of comments are actually getting audience support through likes. This is more useful here than a generic correlation matrix because it directly answers what type of sentiment gets endorsed."
   )
 
-  if corr_matrix.empty:
-    st.info("Not enough numeric variation is available to build a useful relationship matrix for this view.")
-  else:
-    fig_corr = px.imshow(
-      corr_matrix,
-      text_auto=".2f",
-      aspect="auto",
-      color_continuous_scale="RdBu",
-      zmin=-1,
-      zmax=1,
-      template="plotly_dark",
-      title="Metric Relationship Matrix",
-    )
-    fig_corr.update_layout(
-      xaxis_title="Metric",
-      yaxis_title="Metric",
-      height=520,
-      coloraxis_colorbar_title="Correlation",
-    )
-    st.plotly_chart(fig_corr, use_container_width=True)
+  endorse_left, endorse_right = st.columns(2)
+
+  with endorse_left:
+    if endorsement_view.empty:
+      st.info("Not enough data is available to show endorsement by sentiment bucket.")
+    else:
+      fig_endorsement = px.bar(
+        endorsement_view,
+        x="sentiment_bucket",
+        y="avg_likes_per_comment",
+        color="sentiment_bucket",
+        hover_data={
+          "comments_count": ":,.0f",
+          "total_comment_likes": ":,.0f",
+          "avg_sentiment_score": ":.3f",
+          "avg_likes_per_comment": ":.2f",
+          "sentiment_bucket_order": False,
+        },
+        labels={
+          "sentiment_bucket": "Sentiment Bucket",
+          "avg_likes_per_comment": "Average Likes per Comment",
+          "comments_count": "Matched Comments",
+          "total_comment_likes": "Total Comment Likes",
+          "avg_sentiment_score": "Average Sentiment Score",
+        },
+        template="plotly_dark",
+        title="Audience Endorsement by Sentiment Bucket",
+      )
+      fig_endorsement.update_layout(
+        xaxis_title="Sentiment Bucket",
+        yaxis_title="Average Likes per Comment",
+        showlegend=False,
+        height=470,
+      )
+      st.plotly_chart(fig_endorsement, use_container_width=True)
+
+  with endorse_right:
+    if like_distribution_view.empty:
+      st.info("Not enough data is available to show like distribution by sentiment label.")
+    else:
+      fig_like_dist = px.box(
+        like_distribution_view,
+        x="sentiment_label",
+        y="resolved_like_count",
+        color="sentiment_label",
+        points="outliers",
+        labels={
+          "sentiment_label": "Sentiment Label",
+          "resolved_like_count": "Comment Likes",
+        },
+        template="plotly_dark",
+        title="Like Distribution by Sentiment Label",
+      )
+      fig_like_dist.update_layout(
+        xaxis_title="Sentiment Label",
+        yaxis_title="Comment Likes",
+        showlegend=False,
+        height=470,
+      )
+      st.plotly_chart(fig_like_dist, use_container_width=True)
