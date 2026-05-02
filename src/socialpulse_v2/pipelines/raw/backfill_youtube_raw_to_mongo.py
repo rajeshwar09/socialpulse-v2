@@ -368,7 +368,15 @@ def discover_backfill_sources(
 ) -> dict[str, list[Path]]:
   active_dump_files = dump_files if dump_files is not None else DEFAULT_DUMP_FILES
 
-  manifests = sorted(daily_root.glob("daily-*/manifest.json")) if daily_root.exists() else []
+  manifests: list[Path] = []
+  if daily_root.exists():
+    direct_manifest = daily_root / "manifest.json"
+
+    if direct_manifest.exists():
+      manifests = [direct_manifest]
+    else:
+      manifests = sorted(daily_root.glob("daily-*/manifest.json"))
+
   dumps = [path for path in active_dump_files if path.exists()]
 
   return {

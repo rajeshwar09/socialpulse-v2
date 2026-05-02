@@ -672,6 +672,34 @@
     "lookback_days": 30
   },
   {
+    "query_id": "yt-custom-elections-india_election_analysis",
+    "platform": "youtube",
+    "topic": "elections",
+    "genre": "politics",
+    "query_text": "india election analysis",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 800,
+    "search_results_limit": 18,
+    "comments_per_video_limit": 70,
+    "lookback_days": 21
+  },
+  {
+    "query_id": "yt-custom-governance-government_policy_debate",
+    "platform": "youtube",
+    "topic": "governance",
+    "genre": "politics",
+    "query_text": "government policy debate india",
+    "priority": 8,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 800,
+    "search_results_limit": 18,
+    "comments_per_video_limit": 70,
+    "lookback_days": 21
+  },
+  {
     "query_id": "yt-boxing-wave-334",
     "platform": "youtube",
     "topic": "boxing",
@@ -1456,6 +1484,20 @@
     "lookback_days": 30
   },
   {
+    "query_id": "yt-custom-political_leaders-modi_rahul_gandhi_politi",
+    "platform": "youtube",
+    "topic": "political_leaders",
+    "genre": "politics",
+    "query_text": "modi rahul gandhi political debate",
+    "priority": 7,
+    "active": true,
+    "cadence": "daily",
+    "expected_units": 700,
+    "search_results_limit": 16,
+    "comments_per_video_limit": 65,
+    "lookback_days": 21
+  },
+  {
     "query_id": "yt-cricket-highlights-01",
     "platform": "youtube",
     "topic": "cricket",
@@ -1610,6 +1652,34 @@
     "lookback_days": 14
   },
   {
+    "query_id": "yt-custom-test-iit_ropar",
+    "platform": "youtube",
+    "topic": "education",
+    "genre": "education",
+    "query_text": "IIT Ropar",
+    "priority": 6,
+    "active": false,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 3,
+    "comments_per_video_limit": 5,
+    "lookback_days": 30
+  },
+  {
+    "query_id": "yt-custom-politics-political_news",
+    "platform": "youtube",
+    "topic": "politics",
+    "genre": "politics",
+    "query_text": "political news",
+    "priority": 6,
+    "active": false,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 10,
+    "comments_per_video_limit": 40,
+    "lookback_days": 30
+  },
+  {
     "query_id": "yt-custom-cricket-ipl",
     "platform": "youtube",
     "topic": "cricket",
@@ -1664,5 +1734,19 @@
     "search_results_limit": 10,
     "comments_per_video_limit": 40,
     "lookback_days": 14
+  },
+  {
+    "query_id": "yt-custom-smartphones-budget_smartphone_review",
+    "platform": "youtube",
+    "topic": "smartphones",
+    "genre": "technology",
+    "query_text": "budget smartphone review 2026",
+    "priority": 6,
+    "active": false,
+    "cadence": "daily",
+    "expected_units": 100,
+    "search_results_limit": 1,
+    "comments_per_video_limit": 5,
+    "lookback_days": 7
   }
 ]

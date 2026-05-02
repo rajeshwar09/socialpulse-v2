@@ -11,6 +11,11 @@ BRONZE_DAILY_PATH = "data/lakehouse/bronze/youtube_comments_daily_raw"
 BRONZE_KAFKA_PATH = "data/lakehouse/bronze/youtube_comments_kafka_raw"
 SILVER_PATH = "data/lakehouse/silver/youtube_comments_silver"
 
+def _safe_timestamp(df: DataFrame, column_name: str) -> F.Column:
+  if column_name not in df.columns:
+    return F.lit(None).cast("timestamp")
+
+  return F.expr(f"try_cast(nullif(trim(`{column_name}`), '') as timestamp)")
 
 def _col_or_null(df: DataFrame, name: str):
   if name in df.columns:
@@ -62,7 +67,7 @@ def transform_youtube_comments_to_silver(bronze_df: DataFrame) -> DataFrame:
   curated = bronze_df.select(
     _col_or_null(bronze_df, "run_id").cast("string").alias("run_id"),
     F.to_date(_col_or_null(bronze_df, "collection_date")).alias("collection_date"),
-    F.to_timestamp(_col_or_null(bronze_df, "ingested_at")).alias("ingested_at"),
+    _safe_timestamp(bronze_df, "ingested_at").alias("ingested_at"),
     _col_or_null(bronze_df, "platform").cast("string").alias("platform"),
     _col_or_null(bronze_df, "ingestion_type").cast("string").alias("ingestion_type"),
     _col_or_null(bronze_df, "source_table").cast("string").alias("source_table"),
@@ -73,15 +78,15 @@ def transform_youtube_comments_to_silver(bronze_df: DataFrame) -> DataFrame:
     _col_or_null(bronze_df, "video_id").cast("string").alias("video_id"),
     _col_or_null(bronze_df, "video_title").cast("string").alias("video_title"),
     _col_or_null(bronze_df, "video_description").cast("string").alias("video_description"),
-    F.to_timestamp(_col_or_null(bronze_df, "video_published_at")).alias("video_published_at"),
+    _safe_timestamp(bronze_df, "video_published_at").alias("video_published_at"),
     _col_or_null(bronze_df, "video_url").cast("string").alias("video_url"),
     _col_or_null(bronze_df, "channel_id").cast("string").alias("channel_id"),
     _col_or_null(bronze_df, "channel_title").cast("string").alias("channel_title"),
     _col_or_null(bronze_df, "comment_id").cast("string").alias("comment_id"),
     _col_or_null(bronze_df, "comment_text").cast("string").alias("comment_text"),
     _col_or_null(bronze_df, "comment_like_count").cast("long").alias("comment_like_count"),
-    F.to_timestamp(_col_or_null(bronze_df, "comment_published_at")).alias("comment_published_at"),
-    F.to_timestamp(_col_or_null(bronze_df, "comment_updated_at")).alias("comment_updated_at"),
+    _safe_timestamp(bronze_df, "comment_published_at").alias("comment_published_at"),
+    _safe_timestamp(bronze_df, "comment_updated_at").alias("comment_updated_at"),
     _col_or_null(bronze_df, "reply_count").cast("long").alias("reply_count"),
     _col_or_null(bronze_df, "author_display_name").cast("string").alias("author_display_name"),
     _col_or_null(bronze_df, "author_channel_id").cast("string").alias("author_channel_id"),
