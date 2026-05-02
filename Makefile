@@ -1,4 +1,4 @@
-.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-youtube run-bronze-daily-ingestion kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree run-gold-youtube-sentiment-all mongo-up mongo-init mongo-check mongo-logs mongo-down mongo-reset run-mongo-check run-mongo-backfill-dry-run run-mongo-backfill
+.PHONY: install test run-dashboard run-lakehouse-bootstrap run-historical-bootstrap run-daily-plan run-daily-pipeline run-daily-youtube run-daily-youtube-local run-bronze-daily-ingestion run-bronze-daily-ingestion-local kafka-up kafka-down kafka-logs run-kafka-producer run-kafka-consumer run-silver-youtube-comments run-silver-youtube-sentiment run-gold-youtube-sentiment run-gold-daily-overview run-gold-youtube-sentiment-descriptive run-predictive test-gold tree run-gold-youtube-sentiment-all mongo-up mongo-init mongo-check mongo-logs mongo-down mongo-reset run-mongo-check run-mongo-backfill-dry-run run-mongo-backfill
 install:
 	pip install -r requirements.txt
 	pip install -e .
@@ -18,10 +18,19 @@ run-historical-bootstrap:
 run-daily-plan:
 	PYTHONPATH=src python -m socialpulse_v2.orchestration.plan_daily_collection
 
+run-daily-pipeline:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_daily_pipeline
+
 run-daily-youtube:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_daily_youtube_mongo_collection
+
+run-daily-youtube-local:
 	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_daily_youtube_collection
 
 run-bronze-daily-ingestion:
+	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_bronze_mongo_ingestion
+
+run-bronze-daily-ingestion-local:
 	PYTHONPATH=src python -m socialpulse_v2.orchestration.run_bronze_daily_ingestion
 
 kafka-up:
