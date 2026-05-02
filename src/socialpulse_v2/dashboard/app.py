@@ -197,8 +197,8 @@ def main() -> None:
       custom_lookback_days = st.slider(
         "Lookback days",
         min_value=1,
-        max_value=30,
-        value=14,
+        max_value=3650,
+        value=365,
       )
 
       add_to_daily_registry = st.checkbox(
@@ -213,7 +213,7 @@ def main() -> None:
 
     if run_custom_query:
       try:
-        with st.spinner("Running custom query collection and rebuilding sentiment marts..."):
+        with st.spinner("Running custom query collection, saving to MongoDB, and rebuilding sentiment marts..."):
           result = run_custom_youtube_query_pipeline(
             query_text=custom_query_text,
             topic=custom_topic or None,
@@ -228,8 +228,19 @@ def main() -> None:
 
         st.cache_data.clear()
         st.success(
-          f"Custom query collected successfully. Query ID: {result['query_id']} | Run ID: {result['run_id']} | Comments collected: {result['total_comments_collected']}"
+          f"Custom query collected successfully. Query ID: {result['query_id']} | "
+          f"Run ID: {result['run_id']} | "
+          f"Comments collected: {result['total_comments_collected']} | "
+          f"Mongo upserted: {result['mongo_documents_upserted']} | "
+          f"Mongo matched: {result['mongo_documents_matched']}"
         )
+
+        if result.get("dashboard_refresh_error"):
+          st.warning(
+            "MongoDB and bronze ingestion completed, but dashboard refresh failed. "
+            f"Reason: {result['dashboard_refresh_error']}"
+          )
+
         st.rerun()
       except Exception as exc:
         st.error(f"Custom query collection failed: {exc}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from datetime import UTC, datetime
@@ -12,9 +13,7 @@ from rich.table import Table
 from socialpulse_v2.config.query_registry import QueryDefinition, upsert_custom_query
 from socialpulse_v2.core.logging import configure_logging
 from socialpulse_v2.core.settings import settings
-from socialpulse_v2.orchestration.run_bronze_mongo_ingestion import (
-  main as mongo_bronze_main,
-)
+from socialpulse_v2.pipelines.bronze.mongo_daily_ingestion import run_bronze_mongo_ingestion
 from socialpulse_v2.orchestration.run_dashboard_daily_overview import main as dashboard_overview_main
 from socialpulse_v2.orchestration.run_gold_daily_overview import main as daily_overview_main
 from socialpulse_v2.orchestration.run_gold_youtube_comments_predictive import main as predictive_gold_main
@@ -84,6 +83,20 @@ def _run_dashboard_marts_refresh() -> None:
   dashboard_overview_main()
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+  value = os.getenv(name)
+  if value is None:
+    return default
+  return value.strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _env_int(name: str, default: int) -> int:
+  value = os.getenv(name)
+  if value is None or not value.strip():
+    return default
+  return int(value)
+
+
 def run_custom_youtube_query_pipeline(
   query_text: str,
   topic: str | None = None,
@@ -92,9 +105,14 @@ def run_custom_youtube_query_pipeline(
   expected_units: int = 100,
   search_results_limit: int = 5,
   comments_per_video_limit: int = 20,
-  lookback_days: int = 7,
+  lookback_days: int = 365,
   add_to_daily_registry: bool = False,
+  refresh_dashboard: bool = True,
 ) -> dict[str, Any]:
+  query_text = query_text.strip()
+  if not query_text:
+    raise ValueError("Custom query text is required.")
+
   api_key = os.getenv("YOUTUBE_API_KEY", "")
   if not api_key:
     raise ValueError("YOUTUBE_API_KEY is missing. Add it to your environment before running custom collection.")
@@ -132,16 +150,34 @@ def run_custom_youtube_query_pipeline(
   latest_run_dir = Path("data/raw/youtube/daily") / str(manifest["run_id"])
   latest_manifest_path = latest_run_dir / "manifest.json"
 
+  if not latest_manifest_path.exists():
+    raise FileNotFoundError(f"Latest custom query manifest not found: {latest_manifest_path}")
+
   mongo_backfill_summary = run_youtube_raw_backfill_to_mongo(
-    daily_root=latest_run_dir.parent,
+    daily_root=latest_run_dir,
     dump_files=[],
     dry_run=False,
     limit_runs=None,
     limit_records=None,
   )
 
-  mongo_bronze_main()
-  _run_dashboard_marts_refresh()
+  total_comments_collected = int(manifest.get("total_comments_collected", 0) or 0)
+  mongo_documents_prepared = int(mongo_backfill_summary["total_documents_prepared"])
+
+  if total_comments_collected > 0 and mongo_documents_prepared <= 0:
+    raise RuntimeError(
+      "YouTube comments were collected locally, but MongoDB backfill prepared 0 documents. "
+      f"Check manifest: {latest_manifest_path}"
+    )
+
+  run_bronze_mongo_ingestion(dry_run=False, collection_date=None, limit=None)
+
+  dashboard_refresh_error = ""
+  if refresh_dashboard:
+    try:
+      _run_dashboard_marts_refresh()
+    except Exception as exc:
+      dashboard_refresh_error = f"{type(exc).__name__}: {exc}"
 
   return {
     "registry_action": action,
@@ -154,41 +190,53 @@ def run_custom_youtube_query_pipeline(
     "run_id": manifest["run_id"],
     "manifest_path": str(latest_manifest_path),
     "queries_executed": manifest["queries_executed"],
-    "total_comments_collected": manifest["total_comments_collected"],
+    "total_comments_collected": total_comments_collected,
     "error_count": manifest["error_count"],
-    "mongo_documents_prepared": mongo_backfill_summary["total_documents_prepared"],
+    "mongo_documents_prepared": mongo_documents_prepared,
     "mongo_documents_upserted": mongo_backfill_summary["total_upserted_documents"],
     "mongo_documents_matched": mongo_backfill_summary["total_matched_documents"],
+    "mongo_documents_modified": mongo_backfill_summary["total_modified_documents"],
+    "dashboard_refresh_error": dashboard_refresh_error,
   }
+
+
+def parse_args() -> argparse.Namespace:
+  parser = argparse.ArgumentParser(description="Run one custom YouTube query through MongoDB and bronze pipeline.")
+
+  parser.add_argument("--query-text", default=os.getenv("CUSTOM_QUERY_TEXT", "").strip())
+  parser.add_argument("--topic", default=os.getenv("CUSTOM_QUERY_TOPIC", "").strip() or None)
+  parser.add_argument("--genre", default=os.getenv("CUSTOM_QUERY_GENRE", "").strip() or None)
+  parser.add_argument("--priority", type=int, default=_env_int("CUSTOM_QUERY_PRIORITY", 6))
+  parser.add_argument("--expected-units", type=int, default=_env_int("CUSTOM_QUERY_EXPECTED_UNITS", 100))
+  parser.add_argument("--search-results-limit", type=int, default=_env_int("CUSTOM_QUERY_SEARCH_RESULTS", 5))
+  parser.add_argument("--comments-per-video-limit", type=int, default=_env_int("CUSTOM_QUERY_COMMENTS_PER_VIDEO", 20))
+  parser.add_argument("--lookback-days", type=int, default=_env_int("CUSTOM_QUERY_LOOKBACK_DAYS", 365))
+  parser.add_argument(
+    "--add-to-daily-registry",
+    action="store_true",
+    default=_env_bool("CUSTOM_QUERY_ADD_TO_DAILY", False),
+  )
+  parser.add_argument("--skip-dashboard-refresh", action="store_true")
+
+  return parser.parse_args()
 
 
 def main() -> None:
   configure_logging(settings.log_level)
   console = Console()
-
-  query_text = os.getenv("CUSTOM_QUERY_TEXT", "").strip()
-  topic = os.getenv("CUSTOM_QUERY_TOPIC", "").strip() or None
-  genre = os.getenv("CUSTOM_QUERY_GENRE", "").strip() or None
-  priority = int(os.getenv("CUSTOM_QUERY_PRIORITY", "6"))
-  expected_units = int(os.getenv("CUSTOM_QUERY_EXPECTED_UNITS", "100"))
-  search_results_limit = int(os.getenv("CUSTOM_QUERY_SEARCH_RESULTS", "5"))
-  comments_per_video_limit = int(os.getenv("CUSTOM_QUERY_COMMENTS_PER_VIDEO", "20"))
-  lookback_days = int(os.getenv("CUSTOM_QUERY_LOOKBACK_DAYS", "7"))
-  add_to_daily_registry = os.getenv("CUSTOM_QUERY_ADD_TO_DAILY", "false").strip().lower() == "true"
-
-  if not query_text:
-    raise ValueError("CUSTOM_QUERY_TEXT is required.")
+  args = parse_args()
 
   result = run_custom_youtube_query_pipeline(
-    query_text=query_text,
-    topic=topic,
-    genre=genre,
-    priority=priority,
-    expected_units=expected_units,
-    search_results_limit=search_results_limit,
-    comments_per_video_limit=comments_per_video_limit,
-    lookback_days=lookback_days,
-    add_to_daily_registry=add_to_daily_registry,
+    query_text=args.query_text,
+    topic=args.topic,
+    genre=args.genre,
+    priority=args.priority,
+    expected_units=args.expected_units,
+    search_results_limit=args.search_results_limit,
+    comments_per_video_limit=args.comments_per_video_limit,
+    lookback_days=args.lookback_days,
+    add_to_daily_registry=args.add_to_daily_registry,
+    refresh_dashboard=not args.skip_dashboard_refresh,
   )
 
   table = Table(title="Custom YouTube Query Collection")
@@ -208,10 +256,16 @@ def main() -> None:
   table.add_row("Mongo Documents Prepared", str(result["mongo_documents_prepared"]))
   table.add_row("Mongo Documents Upserted", str(result["mongo_documents_upserted"]))
   table.add_row("Mongo Documents Matched", str(result["mongo_documents_matched"]))
+  table.add_row("Mongo Documents Modified", str(result["mongo_documents_modified"]))
   table.add_row("Error Count", str(result["error_count"]))
+  table.add_row("Dashboard Refresh Error", result["dashboard_refresh_error"] or "none")
 
   console.print(table)
-  console.print("[bold green]Custom query collection, MongoDB ingestion, and dashboard refresh completed successfully.[/bold green]")
+
+  if result["dashboard_refresh_error"]:
+    console.print("[bold yellow]MongoDB and bronze ingestion completed, but dashboard refresh failed. Run refresh separately after fixing Spark.[/bold yellow]")
+  else:
+    console.print("[bold green]Custom query collection, MongoDB ingestion, and dashboard refresh completed successfully.[/bold green]")
 
 
 if __name__ == "__main__":
