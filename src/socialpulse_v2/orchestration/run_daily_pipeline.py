@@ -4,8 +4,9 @@ import os
 from collections.abc import Callable
 
 from socialpulse_v2.orchestration.plan_daily_collection import main as plan_main
-from socialpulse_v2.orchestration.run_bronze_daily_ingestion import main as bronze_main
-from socialpulse_v2.orchestration.run_daily_youtube_collection import main as collect_main
+from socialpulse_v2.orchestration.run_daily_youtube_mongo_collection import (
+  main as collect_mongo_main,
+)
 from socialpulse_v2.orchestration.run_dashboard_daily_overview import (
   main as dashboard_overview_main,
 )
@@ -40,8 +41,7 @@ def main() -> None:
 
   steps: list[tuple[str, Callable[[], None]]] = [
     ("Plan daily collection", plan_main),
-    ("Run daily YouTube collection", collect_main),
-    ("Build bronze daily ingestion", bronze_main),
+    ("Run daily YouTube collection through MongoDB", collect_mongo_main),
     ("Build silver YouTube comments", silver_comments_main),
     ("Build silver YouTube comment sentiment", silver_sentiment_main),
     ("Build gold YouTube sentiment marts", sentiment_gold_main),
